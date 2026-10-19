@@ -1,4 +1,4 @@
-# Mahesh Flora (మహేష్ ఫ్లోరా) 🌸
+# Mahesh Flora 🌸
 
 A mobile-first, daily puja and decorative flower ordering and delivery website built for a family business in **Hyderabad, Telangana, India**, serving residents of nearby gated communities and apartments.
 
