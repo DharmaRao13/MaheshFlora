@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Administrator: Strictly authorized via server-assigned custom claim `admin: true`
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
+
+    // Customer: Verified phone owner by Firebase UID or E.164 phone number in token
+    function isCustomerOwner(customerData) {
+      return isAuthenticated() && (
+        request.auth.uid == customerData.uid || 
+        (customerData.phone != null && request.auth.token.phone_number == customerData.phone)
+      );
+    }
+
+    // 1. Products: Public read; Admin write only
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 2. Business Settings: Public read; Admin write only
+    match /businessSettings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 3. Festivals: Public read; Admin write only
+    match /festivals/{festivalId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 4. Orders:
+    // - Authenticated phone customers can create pending orders for their own UID/phone.
+    // - Customers can read only their own orders.
+    // - Customers can ONLY self-cancel (when status is pending_confirmation or confirmed).
+    // - Customers CANNOT modify payment status, delivery status, prices, totals, or customer details.
+    // - Admin can read and update all orders.
+    match /orders/{orderId} {
+      allow create: if isAuthenticated() 
+                    && isCustomerOwner(request.resource.data.customer)
+                    && request.resource.data.orderStatus == 'pending_confirmation' 
+                    && request.resource.data.paymentStatus in ['unpaid', 'pending', 'payment_due']
+                    && request.resource.data.totalPaise > 0;
+      allow read: if isAdmin() || isCustomerOwner(resource.data.customer);
+      allow update: if isAdmin() || (
+        isCustomerOwner(resource.data.customer) &&
+        resource.data.orderStatus in ['pending_confirmation', 'confirmed'] &&
+        request.resource.data.orderStatus == 'cancelled' &&
+        request.resource.data.totalPaise == resource.data.totalPaise &&
+        request.resource.data.items == resource.data.items &&
+        request.resource.data.paymentStatus == resource.data.paymentStatus &&
+        request.resource.data.customer == resource.data.customer
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 5. Subscriptions:
+    // - Customers can create and manage their own subscriptions.
+    // - Only owners or admin can read/modify (pause, skip).
+    match /subscriptions/{subscriptionId} {
+      allow create: if isAuthenticated() && isCustomerOwner(request.resource.data.customer);
+      allow read: if isAdmin() || isCustomerOwner(resource.data.customer);
+      allow update: if isAdmin() || isCustomerOwner(resource.data.customer);
+      allow delete: if isAdmin();
+    }
+
+    // 6. Festival Bookings:
+    // - Customers can request bookings.
+    // - Only admin can confirm or manage.
+    match /festivalBookings/{bookingId} {
+      allow create: if isAuthenticated() && request.resource.data.status == 'requested';
+      allow read: if isAdmin() || isCustomerOwner(resource.data.customer);
+      allow update, delete: if isAdmin();
+    }
+
+    // 7. Payment Records: Private to payment server and admin
+    match /paymentRecords/{paymentId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 8. Customers Profile: Accessible only by the owner or admin
+    match /customers/{customerId} {
+      allow read, write: if isAuthenticated() && (request.auth.uid == customerId || isAdmin());
+    }
+
+    // 9. Daily Prices: Public read; Admin write only
+    match /dailyPrices/{priceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      match /history/{historyId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    // 10. Daily Price History: Admin read/write only
+    match /dailyPriceHistory/{historyId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Fallback: deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
