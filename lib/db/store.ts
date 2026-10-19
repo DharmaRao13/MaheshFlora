@@ -93,17 +93,21 @@ function initializeDb(): DatabaseData {
     dailyPrices: buildDefaultDailyPrices(initialProducts),
     dailyPriceHistory: [],
   };
+  memoryDb = initial;
   saveDb(initial);
   return initial;
 }
 
 function getDb(): DatabaseData {
-  if (fs.existsSync(DATA_FILE)) {
-    try {
+  if (memoryDb) {
+    return memoryDb;
+  }
+  try {
+    if (fs.existsSync(DATA_FILE)) {
       const content = fs.readFileSync(DATA_FILE, 'utf-8');
       const parsed = JSON.parse(content);
       const prods = parsed.products?.length ? parsed.products : INITIAL_PRODUCTS;
-      return {
+      memoryDb = {
         products: prods,
         orders: parsed.orders || [],
         subscriptions: parsed.subscriptions || [],
@@ -113,9 +117,10 @@ function getDb(): DatabaseData {
         dailyPrices: parsed.dailyPrices || buildDefaultDailyPrices(prods),
         dailyPriceHistory: parsed.dailyPriceHistory || [],
       };
-    } catch {
-      // If parsing fails, fall back to initial
+      return memoryDb;
     }
+  } catch {
+    // If reading fails, fall back to initial
   }
   return initializeDb();
 }
@@ -125,7 +130,7 @@ function saveDb(data: DatabaseData) {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Failed to persist database file:', err);
+    // Read-only filesystem on Vercel is expected; in-memory state is preserved
   }
 }
 

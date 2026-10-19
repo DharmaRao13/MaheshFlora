@@ -85,7 +85,7 @@ describe('Mahesh Flora — Customer Phone OTP Auth & Admin Custom Claims', () =>
         ],
         deliverySchedule: {
           type: 'one-time',
-          date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+          date: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
           timeSlot: 'morning',
         },
         paymentMethod: 'cod',
