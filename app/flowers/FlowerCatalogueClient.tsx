@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Search, SlidersHorizontal, Sparkles, RefreshCw, Clock } from 'lucide-react';
 import { Product, ProductCategory, DailyPriceRecord } from '@/types';
 import ProductCard from '@/components/ProductCard';
@@ -11,12 +12,21 @@ interface Props {
 }
 
 export default function FlowerCatalogueClient({ initialProducts }: Props) {
+  const searchParams = useSearchParams();
+  const qParam = searchParams.get('q');
+
   const [products, setProducts] = useState<Product[]>(initialProducts);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(qParam || '');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showInStockOnly, setShowInStockOnly] = useState(false);
   const [lastPublishedAt, setLastPublishedAt] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (qParam !== null) {
+      setSearchQuery(qParam);
+    }
+  }, [qParam]);
 
   const applyDailyPricesRecord = (record: DailyPriceRecord) => {
     if (record && record.items) {

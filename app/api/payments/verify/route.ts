@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getOrderById, updateOrderPaymentStatus } from '@/lib/db/store';
-import { verifyAdminAuthorization } from '@/lib/auth';
+import { verifyAdminAuthorizationAsync } from '@/lib/auth';
 
 /**
  * Server-side payment verification endpoint.
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
     // Handle Safe Development Simulator (Restricted to authorized admin/developers)
     if (isSimulation) {
-      const auth = verifyAdminAuthorization(req);
+      const auth = await verifyAdminAuthorizationAsync(req);
       if (!auth.authorized) {
         return NextResponse.json(
           { error: 'Unauthorized: Administrative credentials required for payment simulation.' },

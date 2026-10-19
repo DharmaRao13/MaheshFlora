@@ -17,7 +17,16 @@ import { INITIAL_PRODUCTS, INITIAL_FESTIVALS } from './seed';
 import { DEFAULT_SETTINGS } from '../config';
 import { getAdminDb, isAdminFirebaseConfigured } from '../firebase/admin';
 
+let testFirestoreInstance: any = undefined;
+
+export function _setFirestoreInstanceForTesting(mock: any) {
+  testFirestoreInstance = mock;
+}
+
 function getFirestoreInstance() {
+  if (testFirestoreInstance !== undefined) {
+    return testFirestoreInstance;
+  }
   if (process.env.ENABLE_DEV_MOCK_STORAGE === 'true') {
     return null;
   }
@@ -247,6 +256,25 @@ export async function addProduct(product: Omit<Product, 'id'>): Promise<Product>
   return newProduct;
 }
 
+// ==================== SANITIZATION HELPER ====================
+
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) return data;
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeForFirestore(item)) as any;
+  }
+  if (typeof data === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
+
 // ==================== ORDERS ====================
 
 export async function getOrders(): Promise<Order[]> {
@@ -257,6 +285,7 @@ export async function getOrders(): Promise<Order[]> {
       if (!snap.empty) {
         return snap.docs.map((doc: any) => doc.data() as Order);
       }
+      return [];
     } catch (err) {
       console.warn('Firestore getOrders error, falling back to local store:', err);
     }
@@ -276,6 +305,7 @@ export async function getOrderById(id: string): Promise<Order | null> {
       if (doc.exists) {
         return doc.data() as Order;
       }
+      return null;
     } catch (err) {
       console.warn('Firestore getOrderById error, falling back to local store:', err);
     }
@@ -286,11 +316,37 @@ export async function getOrderById(id: string): Promise<Order | null> {
 }
 
 export async function getOrdersByPhone(phone: string): Promise<Order[]> {
-  const db = getDb();
   const clean = phone.replace(/[^0-9]/g, '').slice(-10);
   if (!clean || clean.length < 10) return [];
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      // Search for both E.164 (+91XXXXXXXXXX) and raw 10-digit formats
+      const phoneVariants = [`+91${clean}`, clean];
+      const snap = await firestore
+        .collection('orders')
+        .where('customer.phone', 'in', phoneVariants)
+        .get();
+
+      if (!snap.empty) {
+        const orders: Order[] = snap.docs.map((d: any) => d.data() as Order);
+        return orders.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
+      return [];
+    } catch (err) {
+      console.warn('Firestore getOrdersByPhone error, falling back to local store:', err);
+    }
+  }
+
+  const db = getDb();
   return [...db.orders]
-    .filter((o) => o.customer.phone.replace(/[^0-9]/g, '').slice(-10) === clean)
+    .filter((o) => {
+      const p = o.customer?.phone?.replace(/[^0-9]/g, '').slice(-10);
+      return p === clean;
+    })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
@@ -307,20 +363,51 @@ export async function getOrdersByCustomerUid(uid: string): Promise<Order[]> {
         const list: Order[] = snap.docs.map((d: any) => d.data() as Order);
         return list.sort((a: Order, b: Order) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       }
+      return [];
     } catch (err) {
-      console.warn('Firestore getOrdersByCustomerUid error:', err);
+      console.warn('Firestore getOrdersByCustomerUid error, falling back to local store:', err);
     }
   }
 
   const db = getDb();
   return [...db.orders]
-    .filter((o) => o.customer.uid === uid)
+    .filter((o) => o.customer?.uid === uid)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function getOrdersByIds(ids: string[]): Promise<Order[]> {
-  const db = getDb();
+  if (!ids || ids.length === 0) return [];
   const set = new Set(ids);
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const chunks: string[][] = [];
+      for (let i = 0; i < ids.length; i += 30) {
+        chunks.push(ids.slice(i, i + 30));
+      }
+      const results: Order[] = [];
+      for (const chunk of chunks) {
+        const snap = await firestore
+          .collection('orders')
+          .where('__name__', 'in', chunk)
+          .get();
+        if (!snap.empty) {
+          snap.docs.forEach((d: any) => results.push(d.data() as Order));
+        }
+      }
+      if (results.length > 0) {
+        return results.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
+      return [];
+    } catch (err) {
+      console.warn('Firestore getOrdersByIds error, falling back to local store:', err);
+    }
+  }
+
+  const db = getDb();
   return [...db.orders]
     .filter((o) => set.has(o.id))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -336,17 +423,22 @@ export async function createOrder(order: Order): Promise<Order> {
   if (!order.statusUpdatedAt) {
     order.statusUpdatedAt = order.createdAt;
   }
-  db.orders.push(order);
-  saveDb(db);
 
+  // 1. Confirm persistence in Firestore if configured
   const firestore = getFirestoreInstance();
   if (firestore) {
+    const cleaned = sanitizeForFirestore(order);
     try {
-      await firestore.collection('orders').doc(order.id).set(order);
-    } catch (err) {
-      console.warn('Firestore createOrder error:', err);
+      await firestore.collection('orders').doc(order.id).set(cleaned);
+    } catch (err: any) {
+      console.error(`[Order Persistence Failed] Order ID: ${order.id}. Error:`, err?.message || err);
+      throw new Error(`Failed to securely save order ${order.id} to database. Please try again.`);
     }
   }
+
+  // 2. Also update local in-memory store
+  db.orders.push(order);
+  saveDb(db);
 
   return order;
 }
@@ -641,11 +733,11 @@ export async function updateSettings(updates: Partial<BusinessSettings>): Promis
 // ==================== DASHBOARD METRICS ====================
 
 export async function getDashboardMetrics() {
-  const db = getDb();
+  const allOrders = await getOrders();
+  const allSubs = await getSubscriptions();
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
 
-  const allOrders = db.orders;
   const todaysOrders = allOrders.filter(
     (o) => o.createdAt.startsWith(todayStr) || o.deliverySchedule?.date === todayStr
   );
@@ -659,13 +751,16 @@ export async function getDashboardMetrics() {
   ).length;
 
   const paidOrders = allOrders.filter((o) => o.paymentStatus === 'paid').length;
-  const unpaidOrders = allOrders.filter((o) => o.paymentStatus === 'unpaid' || o.paymentStatus === 'pending').length;
+  const unpaidOrders = allOrders.filter(
+    (o) => o.paymentStatus === 'unpaid' || o.paymentStatus === 'pending' || o.paymentStatus === 'payment_due'
+  ).length;
 
   const awaitingDelivery = allOrders.filter(
     (o) => o.orderStatus === 'preparing' || o.orderStatus === 'out_for_delivery'
   ).length;
 
-  const activeSubscriptions = db.subscriptions.filter((s) => s.status === 'active').length;
+  const activeSubscriptions = allSubs.filter((s) => s.status === 'active').length;
+  const db = getDb();
   const upcomingFestivalBookings = db.festivalBookings.filter(
     (b) => b.status !== 'cancelled'
   ).length;
@@ -845,6 +940,7 @@ export async function getDailyPriceHistory(): Promise<DailyPriceRecord[]> {
 
 // Helper to reset database for tests
 export function _resetDbForTesting() {
+  testFirestoreInstance = undefined;
   const prods = JSON.parse(JSON.stringify(INITIAL_PRODUCTS));
   memoryDb = {
     products: prods,

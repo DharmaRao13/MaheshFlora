@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuthorization, verifyOrderAccess } from '@/lib/auth';
+import { verifyAdminAuthorizationAsync, verifyOrderAccessAsync } from '@/lib/auth';
 import { getOrders, updateOrderStatus, updateOrderPaymentStatus, getOrderById } from '@/lib/db/store';
 import { OrderStatus, PaymentStatus } from '@/types';
 
 export async function GET(req: NextRequest) {
-  const auth = verifyAdminAuthorization(req);
+  const auth = await verifyAdminAuthorizationAsync(req);
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.reason }, { status: 401 });
   }
@@ -32,10 +32,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Check admin authorization
-  const auth = verifyAdminAuthorization(req);
+  const auth = await verifyAdminAuthorizationAsync(req);
   if (!auth.authorized) {
     // If not admin, check if customer is attempting to modify someone else's order
-    const access = verifyOrderAccess(req, existingOrder.customer.phone);
+    const access = await verifyOrderAccessAsync(req, existingOrder.customer.phone);
     if (!access.allowed) {
       return NextResponse.json(
         { error: 'Unauthorized: You cannot modify another customer’s order.' },

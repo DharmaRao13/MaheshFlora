@@ -5,6 +5,7 @@ import { CustomerAuthProvider } from '@/context/CustomerAuthContext';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import StickyMobileCartBar from '@/components/StickyMobileCartBar';
+import MobileBottomNav from '@/components/MobileBottomNav';
 
 export const metadata: Metadata = {
   title: 'Mahesh Flora | Fresh Daily Puja Flowers & Subscriptions Hyderabad',
@@ -31,9 +32,10 @@ export default function RootLayout({
           <CartProvider>
             <div className="flex flex-col min-h-screen">
               <Header />
-              <main className="flex-1 pb-16 md:pb-8">{children}</main>
+              <main className="flex-1 pb-24 sm:pb-28 md:pb-8">{children}</main>
               <Footer />
               <StickyMobileCartBar />
+              <MobileBottomNav />
             </div>
           </CartProvider>
         </CustomerAuthProvider>

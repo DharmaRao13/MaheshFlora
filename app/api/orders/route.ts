@@ -7,6 +7,7 @@ import {
   createSubscription,
   getOrders,
   getOrdersByPhone,
+  getOrdersByCustomerUid,
   getOrdersByIds,
 } from '@/lib/db/store';
 import {
@@ -39,15 +40,38 @@ export async function GET(req: NextRequest) {
     // 2. Customer query authenticated via Firebase ID token (Phone OTP)
     const customerAuth = await verifyCustomerTokenAsync(req);
     if (customerAuth.authenticated) {
-      const targetPhone = customerAuth.phone || phone || '';
-      const cleanPhone = targetPhone.replace(/[^0-9]/g, '').slice(-10);
+      const authPhone = customerAuth.phone ? customerAuth.phone.replace(/[^0-9]/g, '').slice(-10) : '';
+      const reqPhone = phone ? phone.replace(/[^0-9]/g, '').slice(-10) : '';
 
-      const candidateOrders = cleanPhone ? await getOrdersByPhone(cleanPhone) : await getOrders();
-      const verifiedOrders = candidateOrders.filter((o) => {
-        if (customerAuth.uid && o.customer?.uid === customerAuth.uid) return true;
-        if (cleanPhone && o.customer?.phone?.replace(/[^0-9]/g, '').slice(-10) === cleanPhone) return true;
-        return false;
-      });
+      // Customer isolation: An authenticated user can never query another customer's phone
+      if (reqPhone && authPhone && reqPhone !== authPhone) {
+        return NextResponse.json(
+          { error: 'Unauthorized: You can only view orders associated with your verified phone number.' },
+          { status: 403 }
+        );
+      }
+
+      const targetPhone = authPhone || reqPhone;
+      const cleanPhone = targetPhone;
+
+      // Query both by verified customer UID and by normalized phone in parallel
+      const [uidOrders, phoneOrders] = await Promise.all([
+        customerAuth.uid ? getOrdersByCustomerUid(customerAuth.uid) : Promise.resolve([]),
+        cleanPhone ? getOrdersByPhone(cleanPhone) : Promise.resolve([]),
+      ]);
+
+      const mergedMap = new Map<string, Order>();
+      for (const o of [...uidOrders, ...phoneOrders]) {
+        const matchesUid = Boolean(customerAuth.uid && o.customer?.uid === customerAuth.uid);
+        const matchesPhone = Boolean(cleanPhone && o.customer?.phone?.replace(/[^0-9]/g, '').slice(-10) === cleanPhone);
+        if (matchesUid || matchesPhone) {
+          mergedMap.set(o.id, o);
+        }
+      }
+
+      const verifiedOrders = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
       return NextResponse.json({ orders: verifiedOrders });
     }
 
@@ -246,7 +270,7 @@ export async function POST(req: NextRequest) {
       phone: verifiedPhone,
     };
 
-    const isCod = paymentMethod === 'cod';
+    const isCod = typeof paymentMethod === 'string' && paymentMethod.toLowerCase() === 'cod';
     const isTestMode = !isCod && Boolean(settings.isPaymentTestMode || process.env.PAYMENT_TEST_MODE === 'true');
 
     const accessToken = crypto.randomUUID();

@@ -19,7 +19,7 @@ export default function StickyMobileCartBar() {
   return (
     <aside
       aria-label="Mobile cart checkout"
-      className="md:hidden fixed bottom-0 left-0 right-0 z-30 p-3 bg-cream-50/95 backdrop-blur-md border-t border-botanical-200 shadow-elevated"
+      className="md:hidden fixed bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-30 p-2.5 bg-cream-50/95 backdrop-blur-md border-t border-botanical-200 shadow-elevated"
     >
       <div className="flex items-center justify-between gap-3 max-w-md mx-auto">
         <div className="flex items-center gap-2.5">

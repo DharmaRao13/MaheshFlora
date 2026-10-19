@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAdminAuthorization } from '@/lib/auth';
+import { verifyAdminAuthorizationAsync } from '@/lib/auth';
 import { getDashboardMetrics } from '@/lib/db/store';
 
 export async function GET(req: NextRequest) {
-  const auth = verifyAdminAuthorization(req);
+  const auth = await verifyAdminAuthorizationAsync(req);
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.reason }, { status: 401 });
   }

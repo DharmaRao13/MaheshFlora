@@ -48,11 +48,14 @@ export async function verifyAdminAuthorizationAsync(
     return { authorized: true, email: 'admin@maheshflora.com' };
   }
 
-  // Check for Firebase Authentication Bearer ID token or custom header
+  // Check for Firebase Authentication Bearer ID token, custom header, or admin_token cookie
   const authHeader = req.headers.get('authorization') || req.headers.get('x-admin-key');
   let idToken: string | null = null;
   if (authHeader) {
     idToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  }
+  if (!idToken) {
+    idToken = (req as any).cookies?.get?.('admin_token')?.value || null;
   }
 
   if (idToken) {
