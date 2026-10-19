@@ -262,3 +262,112 @@ export function canCancelOrder(order: Order): { allowed: boolean; reason?: strin
   }
   return { allowed: true };
 }
+
+/**
+ * Validates Indian postal PIN codes (6 digits, first digit 1-9).
+ */
+export function validatePincode(pincode: string): { valid: boolean; formatted: string; error?: string } {
+  if (!pincode || typeof pincode !== 'string') {
+    return { valid: false, formatted: '', error: 'PIN code is required' };
+  }
+
+  const cleaned = pincode.trim().replace(/\s+/g, '');
+  if (!/^[1-9]\d{5}$/.test(cleaned)) {
+    return {
+      valid: false,
+      formatted: cleaned,
+      error: 'Please enter a valid 6-digit Indian PIN code (e.g., 560001)',
+    };
+  }
+
+  return { valid: true, formatted: cleaned };
+}
+
+/**
+ * Masks an Indian phone number for privacy display (e.g. +91 98765 •••••).
+ */
+export function maskPhoneNumber(phone?: string | null): string {
+  if (!phone) return '';
+  const val = validateIndianPhone(phone);
+  if (!val.valid) return phone;
+  // val.formatted is '+919876543210'
+  const digits = val.formatted.replace('+91', '');
+  return `+91 ${digits.slice(0, 5)} •••••`;
+}
+
+/**
+ * Validates saved delivery address fields.
+ */
+export function validateSavedAddress(input: Record<string, any>): {
+  valid: boolean;
+  sanitized?: Record<string, any>;
+  error?: string;
+} {
+  if (!input || typeof input !== 'object') {
+    return { valid: false, error: 'Address payload is required' };
+  }
+
+  const recipientName = typeof input.recipientName === 'string' ? input.recipientName.trim() : '';
+  if (!recipientName || recipientName.length < 2) {
+    return { valid: false, error: 'Recipient name is required (min 2 characters)' };
+  }
+
+  const phoneRes = validateIndianPhone(input.phone || '');
+  if (!phoneRes.valid) {
+    return { valid: false, error: phoneRes.error || 'Valid phone number is required' };
+  }
+
+  let alternatePhone: string | undefined = undefined;
+  if (input.alternatePhone && typeof input.alternatePhone === 'string' && input.alternatePhone.trim()) {
+    const altRes = validateIndianPhone(input.alternatePhone);
+    if (!altRes.valid) {
+      return { valid: false, error: `Alternate phone: ${altRes.error}` };
+    }
+    alternatePhone = altRes.formatted;
+  }
+
+  const flatNumber = typeof input.flatNumber === 'string' ? input.flatNumber.trim() : '';
+  if (!flatNumber) {
+    return { valid: false, error: 'House / Flat number is required' };
+  }
+
+  const locality = typeof input.locality === 'string' ? input.locality.trim() : (typeof input.apartmentCommunity === 'string' ? input.apartmentCommunity.trim() : '');
+  if (!locality) {
+    return { valid: false, error: 'Street / Locality or Apartment name is required' };
+  }
+
+  const pincodeRes = validatePincode(input.pincode || '');
+  if (!pincodeRes.valid) {
+    return { valid: false, error: pincodeRes.error || 'Valid 6-digit PIN code is required' };
+  }
+
+  const city = (typeof input.city === 'string' && input.city.trim()) ? input.city.trim() : 'Bengaluru';
+  const state = (typeof input.state === 'string' && input.state.trim()) ? input.state.trim() : 'Karnataka';
+  const street = typeof input.street === 'string' ? input.street.trim() : undefined;
+  const landmark = typeof input.landmark === 'string' ? input.landmark.trim() : undefined;
+  const apartmentCommunity = typeof input.apartmentCommunity === 'string' ? input.apartmentCommunity.trim() : undefined;
+  const deliveryInstructions = typeof input.deliveryInstructions === 'string' ? input.deliveryInstructions.trim() : undefined;
+  const label = typeof input.label === 'string' && input.label.trim() ? input.label.trim() : 'Home';
+  const isDefault = Boolean(input.isDefault);
+
+  return {
+    valid: true,
+    sanitized: {
+      recipientName,
+      phone: phoneRes.formatted,
+      alternatePhone,
+      flatNumber,
+      street,
+      locality,
+      apartmentCommunity,
+      landmark,
+      city,
+      state,
+      pincode: pincodeRes.formatted,
+      deliveryInstructions,
+      label,
+      isDefault,
+    },
+  };
+}
+

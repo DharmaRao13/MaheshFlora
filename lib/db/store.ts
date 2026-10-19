@@ -12,6 +12,7 @@ import {
   FestivalBookingStatus,
   DailyPriceItem,
   DailyPriceRecord,
+  SavedAddress,
 } from '@/types';
 import { INITIAL_PRODUCTS, INITIAL_FESTIVALS } from './seed';
 import { DEFAULT_SETTINGS } from '../config';
@@ -83,6 +84,7 @@ interface DatabaseData {
   settings: BusinessSettings;
   dailyPrices?: DailyPriceRecord;
   dailyPriceHistory?: DailyPriceRecord[];
+  addresses?: SavedAddress[];
 }
 
 // In-memory cache + persistent JSON file for safe, reproducible local development
@@ -101,6 +103,7 @@ function initializeDb(): DatabaseData {
     settings: DEFAULT_SETTINGS,
     dailyPrices: buildDefaultDailyPrices(initialProducts),
     dailyPriceHistory: [],
+    addresses: [],
   };
   memoryDb = initial;
   saveDb(initial);
@@ -125,6 +128,7 @@ function getDb(): DatabaseData {
         settings: parsed.settings || DEFAULT_SETTINGS,
         dailyPrices: parsed.dailyPrices || buildDefaultDailyPrices(prods),
         dailyPriceHistory: parsed.dailyPriceHistory || [],
+        addresses: parsed.addresses || [],
       };
       return memoryDb;
     }
@@ -287,7 +291,18 @@ export async function getOrders(): Promise<Order[]> {
       }
       return [];
     } catch (err) {
-      console.warn('Firestore getOrders error, falling back to local store:', err);
+      console.warn('Firestore getOrders with orderBy failed, attempting un-ordered query:', err);
+      try {
+        const fallbackSnap = await firestore.collection('orders').get();
+        if (!fallbackSnap.empty) {
+          return fallbackSnap.docs
+            .map((doc: any) => doc.data() as Order)
+            .sort((a: Order, b: Order) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        }
+        return [];
+      } catch (innerErr) {
+        console.warn('Firestore getOrders fallback error, falling back to local store:', innerErr);
+      }
     }
   }
 
@@ -938,6 +953,224 @@ export async function getDailyPriceHistory(): Promise<DailyPriceRecord[]> {
   return [...(db.dailyPriceHistory || [])].reverse();
 }
 
+// ==================== SAVED ADDRESSES ====================
+
+export async function getSavedAddressesByUid(uid: string): Promise<SavedAddress[]> {
+  if (!uid) return [];
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const snap = await firestore.collection('addresses').where('uid', '==', uid).get();
+      if (!snap.empty) {
+        const list: SavedAddress[] = snap.docs.map((doc: any) => doc.data() as SavedAddress);
+        return list.sort((a: SavedAddress, b: SavedAddress) => {
+          if (a.isDefault && !b.isDefault) return -1;
+          if (!a.isDefault && b.isDefault) return 1;
+          return new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime();
+        });
+      }
+      return [];
+    } catch (err) {
+      console.warn('Firestore getSavedAddressesByUid error, falling back to local store:', err);
+    }
+  }
+
+  const db = getDb();
+  const list: SavedAddress[] = (db.addresses || []).filter((a) => a.uid === uid);
+  return [...list].sort((a: SavedAddress, b: SavedAddress) => {
+    if (a.isDefault && !b.isDefault) return -1;
+    if (!a.isDefault && b.isDefault) return 1;
+    return new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime();
+  });
+}
+
+export async function getSavedAddressById(id: string): Promise<SavedAddress | null> {
+  if (!id) return null;
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const doc = await firestore.collection('addresses').doc(id).get();
+      if (doc.exists) {
+        return doc.data() as SavedAddress;
+      }
+    } catch (err) {
+      console.warn('Firestore getSavedAddressById error, falling back to local store:', err);
+    }
+  }
+
+  const db = getDb();
+  const found = (db.addresses || []).find((a) => a.id === id);
+  return found || null;
+}
+
+export async function createSavedAddress(
+  data: Omit<SavedAddress, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<SavedAddress> {
+  const db = getDb();
+  if (!db.addresses) db.addresses = [];
+
+  const existingForUser = await getSavedAddressesByUid(data.uid);
+  const shouldBeDefault = data.isDefault || existingForUser.length === 0;
+
+  const now = new Date().toISOString();
+  const newAddress: SavedAddress = {
+    ...data,
+    id: `addr-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    isDefault: shouldBeDefault,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const firestore = getFirestoreInstance();
+
+  // If this address is default, unset any previous defaults for this user
+  if (shouldBeDefault) {
+    db.addresses.forEach((a) => {
+      if (a.uid === data.uid) a.isDefault = false;
+    });
+
+    if (firestore) {
+      try {
+        const batch = firestore.batch();
+        for (const existing of existingForUser) {
+          if (existing.isDefault) {
+            batch.update(firestore.collection('addresses').doc(existing.id), {
+              isDefault: false,
+              updatedAt: now,
+            });
+          }
+        }
+        await batch.commit();
+      } catch (err) {
+        console.warn('Firestore clearing default address error:', err);
+      }
+    }
+  }
+
+  db.addresses.push(newAddress);
+  saveDb(db);
+
+  if (firestore) {
+    try {
+      await firestore.collection('addresses').doc(newAddress.id).set(sanitizeForFirestore(newAddress));
+    } catch (err) {
+      console.warn('Firestore createSavedAddress error:', err);
+    }
+  }
+
+  return newAddress;
+}
+
+export async function updateSavedAddress(
+  id: string,
+  uid: string,
+  updates: Partial<Omit<SavedAddress, 'id' | 'uid' | 'createdAt'>>
+): Promise<SavedAddress | null> {
+  const existing = await getSavedAddressById(id);
+  if (!existing || existing.uid !== uid) {
+    return null;
+  }
+
+  const db = getDb();
+  if (!db.addresses) db.addresses = [];
+
+  const now = new Date().toISOString();
+  const firestore = getFirestoreInstance();
+
+  if (updates.isDefault) {
+    db.addresses.forEach((a) => {
+      if (a.uid === uid && a.id !== id) {
+        a.isDefault = false;
+      }
+    });
+
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('addresses').where('uid', '==', uid).get();
+        const batch = firestore.batch();
+        snap.docs.forEach((doc: any) => {
+          if (doc.id !== id && doc.data().isDefault) {
+            batch.update(doc.ref, { isDefault: false, updatedAt: now });
+          }
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn('Firestore clearing other defaults error:', err);
+      }
+    }
+  }
+
+  const updated: SavedAddress = {
+    ...existing,
+    ...updates,
+    updatedAt: now,
+  };
+
+  const idx = db.addresses.findIndex((a) => a.id === id);
+  if (idx !== -1) {
+    db.addresses[idx] = updated;
+  } else {
+    db.addresses.push(updated);
+  }
+  saveDb(db);
+
+  if (firestore) {
+    try {
+      await firestore.collection('addresses').doc(id).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore updateSavedAddress error:', err);
+    }
+  }
+
+  return updated;
+}
+
+export async function deleteSavedAddress(id: string, uid: string): Promise<boolean> {
+  const existing = await getSavedAddressById(id);
+  if (!existing || existing.uid !== uid) {
+    return false;
+  }
+
+  const db = getDb();
+  if (db.addresses) {
+    db.addresses = db.addresses.filter((a) => a.id !== id);
+  }
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('addresses').doc(id).delete();
+    } catch (err) {
+      console.warn('Firestore deleteSavedAddress error:', err);
+    }
+  }
+
+  // If deleted was default, make the next one default
+  if (existing.isDefault) {
+    const remaining = (db.addresses || []).filter((a) => a.uid === uid);
+    if (remaining.length > 0) {
+      const nextDefault = remaining[0];
+      nextDefault.isDefault = true;
+      nextDefault.updatedAt = new Date().toISOString();
+      if (firestore) {
+        try {
+          await firestore.collection('addresses').doc(nextDefault.id).update({
+            isDefault: true,
+            updatedAt: nextDefault.updatedAt,
+          });
+        } catch (err) {
+          console.warn('Firestore promoting new default address error:', err);
+        }
+      }
+    }
+  }
+
+  saveDb(db);
+  return true;
+}
+
 // Helper to reset database for tests
 export function _resetDbForTesting() {
   testFirestoreInstance = undefined;
@@ -951,6 +1184,7 @@ export function _resetDbForTesting() {
     settings: { ...DEFAULT_SETTINGS },
     dailyPrices: buildDefaultDailyPrices(prods),
     dailyPriceHistory: [],
+    addresses: [],
   };
   if (fs.existsSync(DATA_FILE)) {
     try {
@@ -958,4 +1192,5 @@ export function _resetDbForTesting() {
     } catch {}
   }
 }
+
 

@@ -28,15 +28,46 @@ export interface CartItem {
   quantity: number;
 }
 
+export type AddressLabel = 'Home' | 'Work' | 'Parents' | 'Mandir/Pooja Room' | 'Other';
+
+export interface SavedAddress {
+  id: string;
+  uid: string;
+  recipientName: string;
+  phone: string;
+  alternatePhone?: string;
+  flatNumber: string;
+  street?: string;
+  apartmentCommunity?: string;
+  locality: string;
+  landmark?: string;
+  city: string;
+  state: string;
+  pincode: string;
+  deliveryInstructions?: string;
+  label: AddressLabel | string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Address {
   uid?: string;
   customerName: string;
+  recipientName?: string;
   phone: string;
   apartmentCommunity: string;
   buildingTower: string;
   flatNumber: string;
+  street?: string;
+  locality?: string;
+  landmark?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
   deliveryInstructions?: string;
   alternatePhone?: string;
+  label?: string;
 }
 
 export type OrderType = 'one-time' | 'subscription' | 'festival';

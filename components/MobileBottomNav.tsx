@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -15,17 +15,41 @@ import {
   LogIn,
   Phone,
   ArrowRight,
+  MapPin,
   X,
 } from 'lucide-react';
 import { useCustomerAuth } from '@/context/CustomerAuthContext';
 import { DEFAULT_SETTINGS } from '@/lib/config';
+import { maskPhoneNumber } from '@/lib/business';
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
-  const { customerPhone, isAuthenticated, signOut } = useCustomerAuth();
+  const { user, customerPhone, isAuthenticated, signOut } = useCustomerAuth();
   const [accountSheetOpen, setAccountSheetOpen] = useState(false);
+  const [savedCustomerName, setSavedCustomerName] = useState<string | null>(null);
 
   const cleanPhone = customerPhone?.replace(/[^0-9]/g, '').slice(-10);
+  const maskedPhone = maskPhoneNumber(customerPhone);
+  const displayName = user?.displayName || savedCustomerName;
+
+  useEffect(() => {
+    try {
+      const name = localStorage.getItem('mahesh_customer_name');
+      if (name) setSavedCustomerName(name);
+    } catch {}
+  }, [isAuthenticated]);
+
+  // Listen to open-mobile-account-sheet custom events from Header or other controls
+  useEffect(() => {
+    const handleOpen = () => setAccountSheetOpen(true);
+    window.addEventListener('open-mobile-account-sheet', handleOpen);
+    return () => window.removeEventListener('open-mobile-account-sheet', handleOpen);
+  }, []);
+
+  // Close sheet on route changes
+  useEffect(() => {
+    setAccountSheetOpen(false);
+  }, [pathname]);
 
   // Hide on admin routes
   if (pathname?.startsWith('/admin')) {
@@ -108,13 +132,13 @@ export default function MobileBottomNav() {
             type="button"
             onClick={() => setAccountSheetOpen(true)}
             className={`min-h-[48px] py-1 flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium transition active:scale-95 ${
-              accountSheetOpen || isActive('/orders')
+              accountSheetOpen || isActive('/orders') || isActive('/addresses')
                 ? 'text-botanical-900 font-bold'
                 : 'text-stone-500 hover:text-botanical-800'
             }`}
             aria-label="Open Account Menu"
           >
-            <div className={`p-1 rounded-full ${accountSheetOpen || isActive('/orders') ? 'bg-botanical-100 text-botanical-800' : ''}`}>
+            <div className={`p-1 rounded-full ${accountSheetOpen || isActive('/orders') || isActive('/addresses') ? 'bg-botanical-100 text-botanical-800' : ''}`}>
               <User className="w-5 h-5" />
             </div>
             <span>Account</span>
@@ -145,16 +169,22 @@ export default function MobileBottomNav() {
             {/* Header with Title and Close button */}
             <div className="flex items-center justify-between pb-2 border-b border-botanical-100">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-botanical-700 text-cream-50 flex items-center justify-center font-bold text-xs">
-                  {isAuthenticated && cleanPhone ? cleanPhone.slice(-2) : <User className="w-4 h-4" />}
+                <div className="w-9 h-9 rounded-full bg-botanical-700 text-cream-50 flex items-center justify-center font-bold text-xs uppercase shadow-sm">
+                  {displayName ? displayName.slice(0, 2) : cleanPhone ? cleanPhone.slice(-2) : <User className="w-4 h-4" />}
                 </div>
-                <div>
-                  <h3 className="font-serif font-bold text-base text-botanical-900">
-                    {isAuthenticated ? `+91 ${cleanPhone}` : 'My Account'}
+                <div className="min-w-0">
+                  <h3 className="font-serif font-bold text-base text-botanical-900 truncate">
+                    {isAuthenticated ? (displayName || (cleanPhone ? `+91 ${cleanPhone}` : 'Verified Customer')) : 'My Account'}
                   </h3>
-                  <p className="text-[11px] text-stone-500">
-                    {isAuthenticated ? 'Verified Customer' : 'Manage your orders and subscriptions'}
-                  </p>
+                  {isAuthenticated ? (
+                    <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>Verified Customer</span>
+                      {maskedPhone && <span className="text-stone-500 font-mono">({maskedPhone})</span>}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-stone-500">Manage your orders and subscriptions</p>
+                  )}
                 </div>
               </div>
               <button
@@ -189,7 +219,7 @@ export default function MobileBottomNav() {
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                   Active Customer Session
                 </span>
-                <span className="text-[11px] text-emerald-700 font-mono">+91 {cleanPhone}</span>
+                <span className="text-[11px] text-emerald-700 font-mono">{maskedPhone || cleanPhone}</span>
               </div>
             )}
 
@@ -219,6 +249,19 @@ export default function MobileBottomNav() {
                 <span>My Orders</span>
               </Link>
 
+              {isAuthenticated && (
+                <Link
+                  href="/addresses"
+                  onClick={() => setAccountSheetOpen(false)}
+                  className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition ${
+                    isActive('/addresses') ? 'bg-botanical-100 text-botanical-900 font-semibold' : 'text-stone-700 hover:bg-cream-200/60'
+                  }`}
+                >
+                  <MapPin className="w-4 h-4 text-botanical-700" />
+                  <span>Saved Addresses</span>
+                </Link>
+              )}
+
               <Link
                 href="/subscriptions"
                 onClick={() => setAccountSheetOpen(false)}
@@ -241,31 +284,14 @@ export default function MobileBottomNav() {
                 <span>My Festival Bookings</span>
               </Link>
 
-              {/* Weekly Subscription Highlight Card */}
-              <div className="pt-2">
-                <Link
-                  href="/subscriptions"
-                  onClick={() => setAccountSheetOpen(false)}
-                  className="flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-petal-50 via-cream-100 to-botanical-50 border border-petal-200 text-xs shadow-soft transition active:scale-95"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Calendar className="w-4 h-4 text-petal-600 shrink-0" />
-                    <div>
-                      <p className="font-bold text-botanical-900">Weekly Puja Subscription</p>
-                      <p className="text-[10px] text-stone-500">Scheduled fresh morning deliveries</p>
-                    </div>
-                  </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-petal-600" />
-                </Link>
-              </div>
-
-              {/* Admin Divider & Link */}
-              <div className="my-2 border-t border-botanical-200/70" />
+              <div className="my-1.5 border-t border-botanical-200/60" />
 
               <Link
                 href="/admin"
                 onClick={() => setAccountSheetOpen(false)}
-                className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-stone-700 hover:bg-cream-200/60 transition"
+                className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition ${
+                  isActive('/admin') ? 'bg-botanical-100 text-botanical-900 font-semibold' : 'text-stone-700 hover:bg-cream-200/60'
+                }`}
               >
                 <ShieldCheck className="w-4 h-4 text-botanical-700" />
                 <span>Admin Login</span>
@@ -275,7 +301,7 @@ export default function MobileBottomNav() {
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-rose-700 hover:bg-rose-50 transition text-left"
+                  className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium text-rose-700 hover:bg-rose-50 transition text-left"
                 >
                   <LogOut className="w-4 h-4 text-rose-600" />
                   <span>Sign Out</span>
@@ -283,18 +309,18 @@ export default function MobileBottomNav() {
               )}
             </div>
 
-            {/* WhatsApp Support Button */}
-            <div className="pt-2">
+            {/* WhatsApp Contact Bar */}
+            <div className="pt-2 border-t border-botanical-100">
               <a
                 href={`https://wa.me/${DEFAULT_SETTINGS.whatsappNumber}?text=${encodeURIComponent(
-                  'Hello Mahesh Flora, I need assistance with my account or flower delivery.'
+                  'Hello Mahesh Flora, I would like to inquire about fresh flower delivery in Hyderabad.'
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 text-white font-medium text-xs shadow-sm hover:bg-emerald-700 transition"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 text-white font-medium shadow-sm hover:bg-emerald-700 transition text-xs sm:text-sm"
               >
-                <Phone className="w-3.5 h-3.5" />
-                <span>Need Help? Chat on WhatsApp</span>
+                <Phone className="w-4 h-4" />
+                <span>WhatsApp: {DEFAULT_SETTINGS.businessPhone}</span>
               </a>
             </div>
           </div>

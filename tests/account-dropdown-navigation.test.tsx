@@ -132,20 +132,22 @@ describe('Mahesh Flora — Account & Profile Dropdown Navigation', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('5. Mobile navigation drawer contains account options and links', () => {
+  it('5. Compact mobile header contains search, cart, and mobile account button', () => {
     render(
       <CartProvider>
         <Header />
       </CartProvider>
     );
 
-    // Open mobile menu
-    const menuToggle = screen.getByRole('button', { name: /Toggle navigation menu/i });
-    fireEvent.click(menuToggle);
+    // Mobile account button is present
+    const mobileAccountBtn = screen.getByRole('button', { name: /Open account menu/i });
+    expect(mobileAccountBtn).toBeInTheDocument();
 
-    // Mobile drawer shows Account & Profile section
-    expect(screen.getByText(/Account & Profile/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /Flower Catalogue/i }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('link', { name: /Admin Login/i }).length).toBeGreaterThanOrEqual(1);
+    // Mobile search toggle button is present
+    const searchToggle = screen.getByRole('button', { name: /Toggle search input/i });
+    expect(searchToggle).toBeInTheDocument();
+
+    // Cart button is present
+    expect(screen.getByRole('link', { name: /View Cart/i })).toBeInTheDocument();
   });
 });

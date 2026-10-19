@@ -171,9 +171,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!customer?.apartmentCommunity?.trim()) {
+    const communityOrLocality = (customer?.apartmentCommunity || customer?.locality || '').trim();
+    if (!communityOrLocality) {
       return NextResponse.json(
-        { error: 'Apartment / Gated Community name is required' },
+        { error: 'Apartment / Gated Community or Locality is required' },
         { status: 400 }
       );
     }
@@ -263,9 +264,14 @@ export async function POST(req: NextRequest) {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const orderId = `MF-${Date.now().toString().slice(-4)}${randomSuffix}`;
 
-    // Cleaned customer object with verified UID and normalized E.164 phone
+    // Cleaned immutable customer snapshot with verified UID and normalized E.164 phone
     const validatedCustomer: Address = {
       ...customer,
+      apartmentCommunity: customer.apartmentCommunity?.trim() || communityOrLocality,
+      locality: customer.locality?.trim() || communityOrLocality,
+      flatNumber: customer.flatNumber.trim(),
+      customerName: (customer.customerName || customer.recipientName || '').trim(),
+      recipientName: (customer.recipientName || customer.customerName || '').trim(),
       uid: verifiedUid,
       phone: verifiedPhone,
     };

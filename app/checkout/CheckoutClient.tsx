@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -16,12 +16,19 @@ import {
   Sparkles,
   CheckCircle2,
   Building,
-  Info
+  Info,
+  Plus,
+  Edit2,
+  Home,
+  Briefcase,
+  Heart,
+  Check,
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useCustomerAuth } from '@/context/CustomerAuthContext';
 import { DEFAULT_SETTINGS, formatINR } from '@/lib/config';
-import { DeliveryTimeSlot, PaymentMethod } from '@/types';
+import { DeliveryTimeSlot, PaymentMethod, SavedAddress, AddressLabel } from '@/types';
+import { validateIndianPhone, validatePincode } from '@/lib/business';
 
 const DAYS_OF_WEEK = [
   { id: 'Mon', label: 'Mon', name: 'Monday' },
@@ -33,28 +40,107 @@ const DAYS_OF_WEEK = [
   { id: 'Sun', label: 'Sun', name: 'Sunday' },
 ] as const;
 
+const ADDRESS_LABELS: AddressLabel[] = ['Home', 'Work', 'Parents', 'Mandir/Pooja Room', 'Other'];
+
 export default function CheckoutClient() {
   const router = useRouter();
   const { items, subtotalPaise, deliveryFeePaise, totalPaise, clearCart, syncCartPrices, isHydrated } = useCart();
-  const { user, customerPhone, idToken, getIdToken, sendOtp, verifyOtp } = useCustomerAuth();
+  const { user, customerPhone, idToken, getIdToken, sendOtp, verifyOtp, isAuthenticated } = useCustomerAuth();
 
   // Mode: one-time or subscription
   const [orderMode, setOrderMode] = useState<'one-time' | 'subscription'>('one-time');
 
+  // Saved Addresses State
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | 'new'>('new');
+  const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
+  const [isAddressFormExpanded, setIsAddressFormExpanded] = useState(true);
+  const [saveAddressForFuture, setSaveAddressForFuture] = useState(true);
+  const [showConfirmAddressUpdate, setShowConfirmAddressUpdate] = useState(false);
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
+
   // Customer Address form state
   const [customerName, setCustomerName] = useState('');
   const [phone, setPhone] = useState('');
-  const [apartmentCommunity, setApartmentCommunity] = useState('');
-  const [buildingTower, setBuildingTower] = useState('');
+  const [alternatePhone, setAlternatePhone] = useState('');
   const [flatNumber, setFlatNumber] = useState('');
+  const [buildingTower, setBuildingTower] = useState('');
+  const [street, setStreet] = useState('');
+  const [apartmentCommunity, setApartmentCommunity] = useState('');
+  const [locality, setLocality] = useState('');
+  const [landmark, setLandmark] = useState('');
+  const [city, setCity] = useState('Bengaluru');
+  const [state, setState] = useState('Karnataka');
+  const [pincode, setPincode] = useState('560001');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
+  const [addressLabel, setAddressLabel] = useState<AddressLabel | string>('Home');
 
-  // Prefill phone from customerPhone if available
+  // Prefill phone from customerPhone or localStorage if available
   useEffect(() => {
     if (customerPhone && !phone) {
       setPhone(customerPhone.replace(/[^0-9]/g, '').slice(-10));
     }
-  }, [customerPhone, phone]);
+    try {
+      const savedName = localStorage.getItem('mahesh_customer_name');
+      if (savedName && !customerName) {
+        setCustomerName(savedName);
+      }
+    } catch {}
+  }, [customerPhone, phone, customerName]);
+
+  // Select a saved address and populate form fields
+  const applyAddressToForm = (addr: SavedAddress) => {
+    setSelectedAddressId(addr.id);
+    setCustomerName(addr.recipientName);
+    setPhone(addr.phone.replace(/[^0-9]/g, '').slice(-10));
+    setAlternatePhone(addr.alternatePhone ? addr.alternatePhone.replace(/[^0-9]/g, '').slice(-10) : '');
+    setFlatNumber(addr.flatNumber);
+    setBuildingTower('');
+    setStreet(addr.street || '');
+    setApartmentCommunity(addr.apartmentCommunity || '');
+    setLocality(addr.locality || '');
+    setLandmark(addr.landmark || '');
+    setCity(addr.city || 'Bengaluru');
+    setState(addr.state || 'Karnataka');
+    setPincode(addr.pincode || '');
+    setDeliveryInstructions(addr.deliveryInstructions || '');
+    setAddressLabel(addr.label || 'Home');
+    setIsAddressFormExpanded(false);
+  };
+
+  // Fetch saved addresses for authenticated customer
+  const loadSavedAddresses = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setIsLoadingAddresses(true);
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (user?.uid) headers['x-customer-uid'] = user.uid;
+      if (customerPhone) headers['x-customer-phone'] = customerPhone.replace(/[^0-9]/g, '').slice(-10);
+
+      const res = await fetch('/api/addresses', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const list: SavedAddress[] = data.addresses || [];
+        setSavedAddresses(list);
+
+        if (list.length > 0) {
+          // Preselect default or first address
+          const defaultAddr = list.find((a) => a.isDefault) || list[0];
+          applyAddressToForm(defaultAddr);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load saved addresses:', err);
+    } finally {
+      setIsLoadingAddresses(false);
+    }
+  }, [isAuthenticated, getIdToken, user?.uid, customerPhone]);
+
+  useEffect(() => {
+    loadSavedAddresses();
+  }, [loadSavedAddresses]);
 
   // Phone OTP Verification modal & state
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -132,6 +218,107 @@ export default function CheckoutClient() {
     );
   };
 
+  const getLabelIcon = (lbl: string) => {
+    switch (lbl) {
+      case 'Work':
+        return <Briefcase className="w-3.5 h-3.5" />;
+      case 'Parents':
+        return <Heart className="w-3.5 h-3.5" />;
+      case 'Mandir/Pooja Room':
+        return <Sparkles className="w-3.5 h-3.5" />;
+      default:
+        return <Home className="w-3.5 h-3.5" />;
+    }
+  };
+
+  // Helper to persist new or updated address to customer profile
+  const persistAddressIfRequested = async (authToken?: string | null) => {
+    if (!saveAddressForFuture) return;
+    try {
+      const token = authToken || (await getIdToken());
+      if (!token) return;
+
+      const payload = {
+        recipientName: customerName.trim(),
+        phone: phone.trim(),
+        alternatePhone: alternatePhone.trim() || undefined,
+        flatNumber: flatNumber.trim(),
+        street: street.trim() || undefined,
+        apartmentCommunity: apartmentCommunity.trim() || undefined,
+        locality: locality.trim() || apartmentCommunity.trim(),
+        landmark: landmark.trim() || undefined,
+        city: city.trim() || 'Bengaluru',
+        state: state.trim() || 'Karnataka',
+        pincode: pincode.trim(),
+        deliveryInstructions: deliveryInstructions.trim() || undefined,
+        label: addressLabel,
+        isDefault: savedAddresses.length === 0,
+      };
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      };
+      if (user?.uid) headers['x-customer-uid'] = user.uid;
+
+      await fetch('/api/addresses', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.warn('Address saving in checkout failed silently:', err);
+    }
+  };
+
+  const handleUpdateExistingAddress = async () => {
+    if (selectedAddressId === 'new') return;
+    setIsSavingAddress(true);
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (user?.uid) headers['x-customer-uid'] = user.uid;
+
+      const payload = {
+        recipientName: customerName.trim(),
+        phone: phone.trim(),
+        alternatePhone: alternatePhone.trim() || undefined,
+        flatNumber: flatNumber.trim(),
+        street: street.trim() || undefined,
+        apartmentCommunity: apartmentCommunity.trim() || undefined,
+        locality: locality.trim() || apartmentCommunity.trim(),
+        landmark: landmark.trim() || undefined,
+        city: city.trim() || 'Bengaluru',
+        state: state.trim() || 'Karnataka',
+        pincode: pincode.trim(),
+        deliveryInstructions: deliveryInstructions.trim() || undefined,
+        label: addressLabel,
+      };
+
+      const res = await fetch(`/api/addresses/${selectedAddressId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || 'Failed to update address');
+      }
+
+      setShowConfirmAddressUpdate(false);
+      setIsAddressFormExpanded(false);
+      loadSavedAddresses();
+    } catch (err: any) {
+      alert(err.message || 'Error updating address');
+    } finally {
+      setIsSavingAddress(false);
+    }
+  };
+
   const executeOrderPlacement = async (authToken?: string | null, forceConfirmPriceChange = false) => {
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -152,18 +339,30 @@ export default function CheckoutClient() {
         headers['x-customer-uid'] = user.uid;
       }
 
+      // Immutable address snapshot for order persistence
+      const addressSnapshot = {
+        customerName: customerName.trim(),
+        recipientName: customerName.trim(),
+        phone: phone.trim(),
+        alternatePhone: alternatePhone.trim() || undefined,
+        apartmentCommunity: apartmentCommunity.trim() || locality.trim(),
+        buildingTower: buildingTower.trim() || undefined,
+        flatNumber: flatNumber.trim(),
+        street: street.trim() || undefined,
+        locality: locality.trim() || apartmentCommunity.trim(),
+        landmark: landmark.trim() || undefined,
+        city: city.trim() || 'Bengaluru',
+        state: state.trim() || 'Karnataka',
+        pincode: pincode.trim(),
+        deliveryInstructions: deliveryInstructions.trim() || undefined,
+        label: addressLabel,
+      };
+
       const response = await fetch('/api/orders', {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          customer: {
-            customerName: customerName.trim(),
-            phone: phone.trim(),
-            apartmentCommunity: apartmentCommunity.trim(),
-            buildingTower: buildingTower.trim(),
-            flatNumber: flatNumber.trim(),
-            deliveryInstructions: deliveryInstructions.trim() || undefined,
-          },
+          customer: addressSnapshot,
           items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
           expectedSubtotalPaise: subtotalPaise,
           confirmPriceChange: forceConfirmPriceChange,
@@ -201,6 +400,11 @@ export default function CheckoutClient() {
         throw new Error(data.error || 'Failed to place order.');
       }
 
+      // Persist address if requested & customer is authenticated
+      if (selectedAddressId === 'new') {
+        await persistAddressIfRequested(tokenToUse);
+      }
+
       // Clear the local cart
       clearCart();
 
@@ -213,6 +417,9 @@ export default function CheckoutClient() {
         }
         if (phone) {
           localStorage.setItem('mahesh_customer_phone', phone.replace(/[^0-9]/g, '').slice(-10));
+        }
+        if (customerName) {
+          localStorage.setItem('mahesh_customer_name', customerName.trim());
         }
       } catch {}
 
@@ -254,24 +461,39 @@ export default function CheckoutClient() {
     if (e) e.preventDefault();
     setErrorMessage(null);
 
-    // Basic frontend verification
-    if (!customerName.trim()) {
-      setErrorMessage('Please enter your full name');
+    // Frontend validation
+    if (!customerName.trim() || customerName.trim().length < 2) {
+      setErrorMessage('Please enter recipient full name (minimum 2 characters)');
       return;
     }
 
-    if (!apartmentCommunity.trim()) {
-      setErrorMessage('Please type your apartment or gated community name');
+    const phoneCheck = validateIndianPhone(phone);
+    if (!phoneCheck.valid) {
+      setErrorMessage(phoneCheck.error || 'Please enter a valid 10-digit mobile number');
       return;
     }
 
-    if (!buildingTower.trim()) {
-      setErrorMessage('Please enter your building or tower name');
-      return;
+    if (alternatePhone.trim()) {
+      const altCheck = validateIndianPhone(alternatePhone);
+      if (!altCheck.valid) {
+        setErrorMessage(`Alternate phone: ${altCheck.error}`);
+        return;
+      }
     }
 
     if (!flatNumber.trim()) {
       setErrorMessage('Please enter your flat or door number');
+      return;
+    }
+
+    if (!apartmentCommunity.trim() && !locality.trim()) {
+      setErrorMessage('Please enter your apartment name or locality');
+      return;
+    }
+
+    const pinCheck = validatePincode(pincode);
+    if (!pinCheck.valid) {
+      setErrorMessage(pinCheck.error || 'Please enter a valid 6-digit Indian PIN code');
       return;
     }
 
@@ -313,7 +535,7 @@ export default function CheckoutClient() {
           Delivery & Checkout
         </h1>
         <p className="text-xs text-stone-600 mt-0.5">
-          Schedule your flower delivery to your gated community flat in Hyderabad
+          Schedule your fresh flower delivery to your home or temple in Hyderabad
         </p>
       </div>
 
@@ -553,119 +775,321 @@ export default function CheckoutClient() {
             )}
           </div>
 
-          {/* SECTION 2: CUSTOMER CONTACT & APARTMENT ADDRESS */}
+          {/* SECTION 2: SAVED ADDRESS SELECTOR & DELIVERY ADDRESS */}
           <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-4">
-            <h2 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-botanical-700" />
-              2. Hyderabad Delivery Address
-            </h2>
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h2 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-botanical-700" />
+                2. Delivery Address
+              </h2>
+              {savedAddresses.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAddressId('new');
+                    setFlatNumber('');
+                    setStreet('');
+                    setApartmentCommunity('');
+                    setLocality('');
+                    setLandmark('');
+                    setPincode('560001');
+                    setDeliveryInstructions('');
+                    setIsAddressFormExpanded(true);
+                  }}
+                  className="text-xs font-semibold text-botanical-800 hover:text-botanical-950 flex items-center gap-1 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add New</span>
+                </button>
+              )}
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Your Full Name *
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            {/* Saved Addresses Cards (If customer is logged in & has saved addresses) */}
+            {savedAddresses.length > 0 && (
+              <div className="space-y-2.5">
+                <p className="text-xs font-semibold text-stone-700">
+                  Select a saved delivery address:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {savedAddresses.map((addr) => {
+                    const isSelected = selectedAddressId === addr.id;
+                    return (
+                      <div
+                        key={addr.id}
+                        onClick={() => applyAddressToForm(addr)}
+                        className={`p-3 rounded-xl border text-left cursor-pointer transition relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'border-botanical-700 bg-white shadow-sm ring-2 ring-botanical-500/20'
+                            : 'border-botanical-200/80 bg-cream-50 hover:bg-white'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-botanical-100 text-botanical-900">
+                              {getLabelIcon(addr.label)}
+                              <span>{addr.label}</span>
+                            </span>
+                            {addr.isDefault && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs font-bold text-stone-900 truncate">
+                            {addr.recipientName}
+                          </p>
+                          <p className="text-[11px] text-stone-600 line-clamp-2 mt-0.5 leading-snug">
+                            {addr.flatNumber}, {addr.apartmentCommunity ? `${addr.apartmentCommunity}, ` : ''}{addr.locality}
+                          </p>
+                          <p className="text-[10px] text-stone-500 font-mono mt-0.5">
+                            {addr.phone}
+                          </p>
+                        </div>
+
+                        {isSelected && (
+                          <div className="flex items-center justify-between mt-2 pt-1 border-t border-botanical-100">
+                            <span className="text-[10px] text-botanical-700 font-bold flex items-center gap-1">
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              Selected
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsAddressFormExpanded((prev) => !prev);
+                              }}
+                              className="text-[11px] text-botanical-800 hover:underline font-semibold flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>{isAddressFormExpanded ? 'Collapse' : 'Edit'}</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Form Fields: Collapsible if using an existing saved address, or always open for new */}
+            {isAddressFormExpanded && (
+              <div className="pt-2 border-t border-botanical-200/60 space-y-3.5 animate-in fade-in duration-150">
+                {selectedAddressId !== 'new' && (
+                  <div className="p-2.5 rounded-xl bg-botanical-50/80 border border-botanical-200 text-xs text-botanical-900 flex items-center justify-between">
+                    <span>Editing selected saved address details</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmAddressUpdate(true)}
+                      className="px-2.5 py-1 rounded-lg bg-botanical-700 text-white text-[11px] font-semibold shadow-soft hover:bg-botanical-800"
+                    >
+                      Update Saved Address
+                    </button>
+                  </div>
+                )}
+
+                {/* Address Label Selector */}
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    Address Label *
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ADDRESS_LABELS.map((lbl) => (
+                      <button
+                        key={lbl}
+                        type="button"
+                        onClick={() => setAddressLabel(lbl)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center gap-1 ${
+                          addressLabel === lbl
+                            ? 'bg-botanical-700 text-cream-50 shadow-xs'
+                            : 'bg-white border border-stone-200 text-stone-700 hover:bg-cream-100'
+                        }`}
+                      >
+                        {getLabelIcon(lbl)}
+                        <span>{lbl}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Recipient Full Name *
+                    </label>
+                    <div className="relative">
+                      <User className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="e.g. Radhika Sharma"
+                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Mobile Number (10 Digits) *
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        required
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                        placeholder="e.g. 9876543210"
+                        maxLength={10}
+                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600 font-mono"
+                      />
+                    </div>
+                    {isPhoneVerified ? (
+                      <span className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Mobile number verified
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-stone-500 mt-0.5 block">
+                        SMS OTP will be sent to confirm this number
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Flat / Door / House Number *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={flatNumber}
+                      onChange={(e) => setFlatNumber(e.target.value)}
+                      placeholder="e.g. Flat 804 / House 12"
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Street / Road / Lane
+                    </label>
+                    <input
+                      type="text"
+                      value={street}
+                      onChange={(e) => setStreet(e.target.value)}
+                      placeholder="e.g. 5th Main, 2nd Cross"
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Apartment / Society Name
+                    </label>
+                    <div className="relative">
+                      <Building className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={apartmentCommunity}
+                        onChange={(e) => setApartmentCommunity(e.target.value)}
+                        placeholder="e.g. Prestige Falcon City"
+                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Locality / Area Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={locality}
+                      onChange={(e) => setLocality(e.target.value)}
+                      placeholder="e.g. Kanakapura Road, Konanakunte"
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Landmark (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={landmark}
+                      onChange={(e) => setLandmark(e.target.value)}
+                      placeholder="Opposite Metro Station"
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      City *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      6-Digit PIN Code *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={pincode}
+                      onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="560001"
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    Optional Delivery Instructions
+                  </label>
                   <input
                     type="text"
-                    required
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="e.g. Radhika Sharma"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    value={deliveryInstructions}
+                    onChange={(e) => setDeliveryInstructions(e.target.value)}
+                    placeholder="e.g. Leave in flower basket on door hook / Ring bell"
+                    className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Indian Mobile Number *
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="e.g. 9876543210"
-                    maxLength={14}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
-                  />
-                </div>
-                {isPhoneVerified ? (
-                  <span className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    Mobile number verified with OTP
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-stone-500 mt-0.5 block">
-                    SMS OTP will be sent to confirm your order and phone identity
-                  </span>
+                {selectedAddressId === 'new' && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="saveAddressFuture"
+                      checked={saveAddressForFuture}
+                      onChange={(e) => setSaveAddressForFuture(e.target.checked)}
+                      className="w-4 h-4 rounded text-botanical-600 focus:ring-botanical-500 border-botanical-300"
+                    />
+                    <label htmlFor="saveAddressFuture" className="text-xs text-stone-800 font-medium cursor-pointer">
+                      Save this address for future flower deliveries
+                    </label>
+                  </div>
                 )}
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Apartment / Gated Community Name *
-              </label>
-              <div className="relative">
-                <Building className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  value={apartmentCommunity}
-                  onChange={(e) => setApartmentCommunity(e.target.value)}
-                  placeholder="Type your apartment or gated community name (e.g. My Home Bhooja, Rainbow Vistas)"
-                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Building / Tower / Block *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={buildingTower}
-                  onChange={(e) => setBuildingTower(e.target.value)}
-                  placeholder="e.g. Tower 3 / Block B"
-                  className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Flat / Door Number *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={flatNumber}
-                  onChange={(e) => setFlatNumber(e.target.value)}
-                  placeholder="e.g. Flat 804"
-                  className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Optional Delivery Instructions
-              </label>
-              <input
-                type="text"
-                value={deliveryInstructions}
-                onChange={(e) => setDeliveryInstructions(e.target.value)}
-                placeholder="e.g. Leave in basket on door hook / Ring bell after 6:30 AM"
-                className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
-              />
-            </div>
+            )}
           </div>
 
           {/* SECTION 3: PAYMENT METHOD */}
@@ -793,12 +1217,43 @@ export default function CheckoutClient() {
           </button>
 
           <div className="space-y-1.5 pt-2 text-[11px] text-stone-500 text-center">
-            <p>✓ No account creation required for one-time orders</p>
+            <p>✓ No prior account creation needed</p>
             <p>✓ Direct WhatsApp updates with your unique Order ID</p>
           </div>
         </div>
 
       </form>
+
+      {/* Confirmation Modal for Updating Saved Address in Checkout */}
+      {showConfirmAddressUpdate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-cream-50 rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-botanical-200 space-y-3">
+            <h4 className="font-serif font-bold text-base text-botanical-900">
+              Confirm Address Update
+            </h4>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Do you want to update this saved address in your account? Future deliveries will use these updated details. Past orders remain unchanged.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmAddressUpdate(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-stone-300 text-xs font-medium text-stone-700 hover:bg-stone-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSavingAddress}
+                onClick={handleUpdateExistingAddress}
+                className="px-4 py-1.5 rounded-lg bg-botanical-700 hover:bg-botanical-800 text-cream-50 text-xs font-semibold shadow-soft"
+              >
+                {isSavingAddress ? 'Saving...' : 'Yes, Update Address'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Phone OTP Verification Modal */}
       {showOtpModal && (

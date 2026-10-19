@@ -5,8 +5,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ShoppingBag,
-  Menu,
-  X,
   Flower2,
   Phone,
   Calendar,
@@ -18,30 +16,39 @@ import {
   LogOut,
   LogIn,
   Search,
-  Home,
-  ArrowRight,
+  MapPin,
+  X,
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useCustomerAuth } from '@/context/CustomerAuthContext';
 import { DEFAULT_SETTINGS } from '@/lib/config';
+import { maskPhoneNumber } from '@/lib/business';
 
 export default function Header() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
-  const [accountSheetOpen, setAccountSheetOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [savedCustomerName, setSavedCustomerName] = useState<string | null>(null);
 
   const { cartCount, isHydrated } = useCart();
-  const { customerPhone, isAuthenticated, signOut } = useCustomerAuth();
+  const { user, customerPhone, isAuthenticated, signOut } = useCustomerAuth();
   const pathname = usePathname();
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const cleanPhone = customerPhone?.replace(/[^0-9]/g, '').slice(-10);
+  const maskedPhone = maskPhoneNumber(customerPhone);
+  const displayName = user?.displayName || savedCustomerName;
 
-  // Flipkart-inspired primary navigation links
+  useEffect(() => {
+    try {
+      const name = localStorage.getItem('mahesh_customer_name');
+      if (name) setSavedCustomerName(name);
+    } catch {}
+  }, [isAuthenticated]);
+
+  // Primary navigation links
   const primaryNavLinks = [
     { href: '/', label: 'Home' },
     { href: '/flowers', label: 'Flowers' },
@@ -77,8 +84,6 @@ export default function Header() {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setAccountDropdownOpen(false);
-        setAccountSheetOpen(false);
-        setMobileMenuOpen(false);
         setMobileSearchOpen(false);
       }
     }
@@ -91,11 +96,9 @@ export default function Header() {
     };
   }, []);
 
-  // Close menus and sheets on route change
+  // Close menus on route change
   useEffect(() => {
     setAccountDropdownOpen(false);
-    setAccountSheetOpen(false);
-    setMobileMenuOpen(false);
     setMobileSearchOpen(false);
   }, [pathname]);
 
@@ -106,8 +109,6 @@ export default function Header() {
       console.warn('Sign out failed:', err);
     } finally {
       setAccountDropdownOpen(false);
-      setAccountSheetOpen(false);
-      setMobileMenuOpen(false);
     }
   };
 
@@ -120,10 +121,16 @@ export default function Header() {
     }
   };
 
+  const handleOpenMobileAccount = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open-mobile-account-sheet'));
+    }
+  };
+
   return (
     <>
       {/* ========================================================================= */}
-      {/* MAIN TOP HEADER (DESKTOP & MOBILE COMPACT)                                 */}
+      {/* MAIN TOP HEADER (DESKTOP & COMPACT MOBILE)                                */}
       {/* ========================================================================= */}
       <header className="sticky top-0 z-40 bg-cream-50/95 backdrop-blur-md border-b border-botanical-100 transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -177,7 +184,7 @@ export default function Header() {
                     }
                   }}
                   className={`px-2.5 lg:px-3 py-1.5 lg:py-2 rounded-lg text-xs lg:text-sm font-medium transition inline-flex items-center gap-1.5 ${
-                    accountDropdownOpen || isActive('/orders')
+                    accountDropdownOpen || isActive('/orders') || isActive('/addresses')
                       ? 'text-botanical-900 bg-botanical-100/70 font-semibold'
                       : 'text-stone-600 hover:text-botanical-800 hover:bg-cream-200/50'
                   }`}
@@ -188,8 +195,8 @@ export default function Header() {
                   <div className="w-5 h-5 rounded-full bg-botanical-100 text-botanical-800 flex items-center justify-center shrink-0">
                     <User className="w-3.5 h-3.5" />
                   </div>
-                  <span className="truncate max-w-[110px] xl:max-w-none">
-                    {isAuthenticated && cleanPhone ? `+91 ${cleanPhone.slice(0, 5)}...` : 'Account'}
+                  <span className="truncate max-w-[120px] xl:max-w-none">
+                    {isAuthenticated ? (displayName ? displayName.split(' ')[0] : (cleanPhone ? `+91 ${cleanPhone.slice(0, 5)}...` : 'Account')) : 'Account'}
                   </span>
                   <ChevronDown
                     className={`w-3.5 h-3.5 transition-transform duration-200 shrink-0 ${
@@ -213,14 +220,19 @@ export default function Header() {
                   {/* Header Profile / Welcome section */}
                   {isAuthenticated ? (
                     <div className="p-3 bg-gradient-to-br from-botanical-100/70 to-cream-100 rounded-xl mb-1.5 border border-botanical-200/60 flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-full bg-botanical-700 text-cream-50 flex items-center justify-center shrink-0 shadow-sm font-bold text-xs">
-                        {cleanPhone ? cleanPhone.slice(-2) : 'MF'}
+                      <div className="w-9 h-9 rounded-full bg-botanical-700 text-cream-50 flex items-center justify-center shrink-0 shadow-sm font-bold text-xs uppercase">
+                        {displayName ? displayName.slice(0, 2) : cleanPhone ? cleanPhone.slice(-2) : 'MF'}
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-bold text-botanical-900 truncate">
-                          +91 {cleanPhone || 'Customer'}
+                          {displayName || (cleanPhone ? `+91 ${cleanPhone}` : 'Verified Customer')}
                         </p>
-                        <p className="text-[10px] text-emerald-700 font-medium flex items-center gap-1">
+                        {maskedPhone && (
+                          <p className="text-[11px] text-stone-600 truncate font-mono">
+                            {maskedPhone}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-0.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                           Verified Customer
                         </p>
@@ -271,6 +283,21 @@ export default function Header() {
                       <Package className="w-4 h-4 text-botanical-700 shrink-0" />
                       <span>My Orders</span>
                     </Link>
+
+                    {isAuthenticated && (
+                      <Link
+                        href="/addresses"
+                        onClick={() => setAccountDropdownOpen(false)}
+                        className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition ${
+                          isActive('/addresses')
+                            ? 'bg-botanical-100/80 text-botanical-900 font-semibold'
+                            : 'text-stone-700 hover:bg-botanical-100/60 hover:text-botanical-900'
+                        }`}
+                      >
+                        <MapPin className="w-4 h-4 text-botanical-700 shrink-0" />
+                        <span>Saved Addresses</span>
+                      </Link>
+                    )}
 
                     <Link
                       href="/subscriptions"
@@ -329,7 +356,7 @@ export default function Header() {
               </div>
             </nav>
 
-            {/* 3. RIGHT CONTROLS: SEARCH, WHATSAPP, CART, MOBILE ICONS */}
+            {/* 3. RIGHT CONTROLS: SEARCH, WHATSAPP, CART, MOBILE ACCOUNT */}
             <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-3 shrink-0">
               
               {/* Desktop Search Control */}
@@ -394,23 +421,14 @@ export default function Header() {
                 )}
               </Link>
 
-              {/* Mobile Account Access Button (opens bottom sheet) */}
+              {/* Mobile Compact Account Access Button (Opens bottom sheet, removes hamburger duplicate) */}
               <button
                 type="button"
-                onClick={() => setAccountSheetOpen(true)}
+                onClick={handleOpenMobileAccount}
                 className="md:hidden p-2 rounded-xl text-botanical-800 bg-cream-200/60 hover:bg-botanical-100 transition flex items-center justify-center"
-                aria-label="Open mobile account menu"
+                aria-label="Open account menu"
               >
                 <User className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-
-              {/* Mobile Menu Hamburger Toggle (for backward compatibility & drawer access) */}
-              <button
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="md:hidden p-2 rounded-lg text-botanical-800 hover:bg-cream-200/80 transition"
-                aria-label="Toggle navigation menu"
-              >
-                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
             </div>
           </div>
@@ -452,216 +470,6 @@ export default function Header() {
           </div>
         )}
       </header>
-
-      {/* ========================================================================= */}
-      {/* MOBILE DRAWER MENU (from top hamburger)                                    */}
-      {/* ========================================================================= */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-t border-botanical-100 bg-cream-50 px-4 pt-3 pb-6 shadow-elevated">
-          {/* Main Navigation Links */}
-          <div className="flex flex-col space-y-1">
-            <Link
-              href="/"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-base ${
-                isActive('/') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-              }`}
-            >
-              <Home className="w-4 h-4 text-botanical-700" />
-              Home
-            </Link>
-            <Link
-              href="/flowers"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-base ${
-                isActive('/flowers') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-              }`}
-            >
-              <Flower2 className="w-4 h-4 text-botanical-700" />
-              Flower Catalogue
-            </Link>
-            <Link
-              href="/subscriptions"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-base ${
-                isActive('/subscriptions') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-              }`}
-            >
-              <Calendar className="w-4 h-4 text-botanical-700" />
-              Weekly Subscription
-            </Link>
-            <Link
-              href="/festivals"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-base ${
-                isActive('/festivals') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-              }`}
-            >
-              <Sparkles className="w-4 h-4 text-marigold-500" />
-              Festival Pre-Booking
-            </Link>
-            <Link
-              href="/cart"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center justify-between px-3 py-2.5 rounded-lg text-base text-stone-700"
-            >
-              <span className="flex items-center gap-3">
-                <ShoppingBag className="w-4 h-4 text-botanical-700" />
-                Shopping Cart
-              </span>
-              {cartCount > 0 && (
-                <span className="bg-petal-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                  {cartCount} items
-                </span>
-              )}
-            </Link>
-          </div>
-
-          {/* Account & Profile Section */}
-          <div className="mt-4 pt-3 border-t border-botanical-200/80 space-y-1">
-            <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-botanical-700 flex items-center justify-between">
-              <span>Account & Profile</span>
-              {isAuthenticated && cleanPhone && (
-                <span className="text-[10px] bg-botanical-100 text-botanical-800 px-2 py-0.5 rounded-full font-semibold">
-                  +91 {cleanPhone}
-                </span>
-              )}
-            </div>
-
-            {isAuthenticated ? (
-              <>
-                <Link
-                  href="/orders"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/orders') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <User className="w-4 h-4 text-botanical-700" />
-                  <span>My Profile</span>
-                </Link>
-                <Link
-                  href="/orders"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/orders') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <Package className="w-4 h-4 text-botanical-700" />
-                  <span>My Orders</span>
-                </Link>
-                <Link
-                  href="/subscriptions"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/subscriptions') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <Calendar className="w-4 h-4 text-botanical-700" />
-                  <span>My Subscriptions</span>
-                </Link>
-                <Link
-                  href="/festivals"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/festivals') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <Sparkles className="w-4 h-4 text-marigold-500" />
-                  <span>My Festival Bookings</span>
-                </Link>
-                <Link
-                  href="/admin"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/admin') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4 text-botanical-700" />
-                  <span>Admin Login</span>
-                </Link>
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-rose-700 hover:bg-rose-50 transition text-left"
-                >
-                  <LogOut className="w-4 h-4 text-rose-600" />
-                  <span>Sign Out</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/orders"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-botanical-700 text-cream-50 font-semibold text-sm shadow-soft"
-                >
-                  <span className="flex items-center gap-2">
-                    <LogIn className="w-4 h-4" />
-                    <span>Login / Sign Up</span>
-                  </span>
-                  <span className="text-[11px] text-cream-200 font-normal">Phone OTP</span>
-                </Link>
-                <Link
-                  href="/orders"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/orders') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <Package className="w-4 h-4 text-botanical-700" />
-                  <span>My Orders</span>
-                </Link>
-                <Link
-                  href="/subscriptions"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/subscriptions') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <Calendar className="w-4 h-4 text-botanical-700" />
-                  <span>My Subscriptions</span>
-                </Link>
-                <Link
-                  href="/festivals"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/festivals') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <Sparkles className="w-4 h-4 text-marigold-500" />
-                  <span>My Festival Bookings</span>
-                </Link>
-                <Link
-                  href="/admin"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                    isActive('/admin') ? 'bg-botanical-100 font-semibold text-botanical-900' : 'text-stone-700'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4 text-botanical-700" />
-                  <span>Admin Login</span>
-                </Link>
-              </>
-            )}
-          </div>
-
-          {/* WhatsApp Contact Bar */}
-          <div className="mt-4 pt-3 border-t border-botanical-100">
-            <a
-              href={`https://wa.me/${DEFAULT_SETTINGS.whatsappNumber}?text=${encodeURIComponent(
-                'Hello Mahesh Flora, I would like to inquire about fresh flower delivery in Hyderabad.'
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 text-white font-medium shadow-sm hover:bg-emerald-700 transition text-sm"
-            >
-              <Phone className="w-4 h-4" />
-              <span>Chat on WhatsApp: {DEFAULT_SETTINGS.businessPhone}</span>
-            </a>
-          </div>
-        </div>
-      )}
     </>
   );
 }
