@@ -79,6 +79,11 @@ describe('Order Persistence, Admin Visibility & Customer Isolation Tests', () =>
 
     const req = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_ramesh',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify(orderPayload),
     });
 
@@ -126,6 +131,11 @@ describe('Order Persistence, Admin Visibility & Customer Isolation Tests', () =>
 
     const req = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_ramesh',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify(orderPayload),
     });
 
@@ -148,6 +158,11 @@ describe('Order Persistence, Admin Visibility & Customer Isolation Tests', () =>
     // Place a new COD order
     const placeReq = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_kavitha',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify({
         customer: {
           customerName: 'Kavitha Rao',
@@ -239,6 +254,11 @@ describe('Order Persistence, Admin Visibility & Customer Isolation Tests', () =>
     // Place an order for rightful customer
     const placeReq = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_rightful',
+        'x-customer-phone': rightfulPhone,
+      },
       body: JSON.stringify({
         customer: {
           customerName: 'Rightful Customer',
@@ -281,6 +301,11 @@ describe('Order Persistence, Admin Visibility & Customer Isolation Tests', () =>
     // Create an online payment order (e.g. WhatsApp UPI / Online)
     const placeReq = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_madhav',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify({
         customer: {
           customerName: 'Madhav V',

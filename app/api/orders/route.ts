@@ -150,8 +150,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Customer identity verification
+    // Customer identity verification: strictly enforce authentication on order placement
     const customerAuth = await verifyCustomerTokenAsync(req);
+    if (!customerAuth.authenticated || !customerAuth.uid) {
+      return NextResponse.json(
+        {
+          error: 'Authentication required. Please verify your phone number via SMS OTP to place an order.',
+          code: 'AUTH_REQUIRED',
+          reason: customerAuth.reason || 'Customer authentication token missing or expired.',
+        },
+        { status: 401 }
+      );
+    }
 
     // Normalize Indian phone numbers to E.164 format (+91XXXXXXXXXX)
     const phoneValidation = validateIndianPhone(customer?.phone);
@@ -162,16 +172,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Determine verified UID and verified phone
-    const verifiedUid = customerAuth.authenticated ? customerAuth.uid : customer?.uid;
-    let verifiedPhone = phoneValidation.formatted;
-
-    if (customerAuth.authenticated && customerAuth.phone) {
-      const authPhoneValidation = validateIndianPhone(customerAuth.phone);
-      if (authPhoneValidation.valid) {
-        verifiedPhone = authPhoneValidation.formatted;
-      }
-    }
+    // SERVER-ENFORCED: Never trust client UID or unverified customer phone
+    const verifiedUid = customerAuth.uid;
+    const verifiedPhone = customerAuth.phone
+      ? validateIndianPhone(customerAuth.phone).formatted
+      : phoneValidation.formatted;
 
     const communityOrLocality = (customer?.apartmentCommunity || customer?.locality || '').trim();
     if (!communityOrLocality) {
@@ -284,6 +289,9 @@ export async function POST(req: NextRequest) {
       recipientName: (customer.recipientName || customer.customerName || '').trim(),
       uid: verifiedUid,
       phone: verifiedPhone,
+      alternatePhone: customer?.phone && validateIndianPhone(customer.phone).formatted !== verifiedPhone
+        ? customer.phone
+        : (customer.alternatePhone?.trim() || undefined),
     };
 
     const isCod = typeof paymentMethod === 'string' && paymentMethod.toLowerCase() === 'cod';

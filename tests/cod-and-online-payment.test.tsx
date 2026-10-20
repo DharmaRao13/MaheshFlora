@@ -24,7 +24,11 @@ describe('COD and Online Payment Flow Tests', () => {
   it('1. Cash on Delivery (COD) order creation sets paymentMethod: cod, paymentStatus: payment_due, and no testPaymentPaise', async () => {
     const codOrderReq = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_suresh',
+        'x-customer-phone': '9848012345',
+      },
       body: JSON.stringify({
         customer: {
           customerName: 'Suresh Varma',

@@ -45,7 +45,7 @@ const ADDRESS_LABELS: AddressLabel[] = ['Home', 'Work', 'Parents', 'Mandir/Pooja
 export default function CheckoutClient() {
   const router = useRouter();
   const { items, subtotalPaise, deliveryFeePaise, totalPaise, clearCart, syncCartPrices, isHydrated } = useCart();
-  const { user, customerPhone, idToken, getIdToken, sendOtp, verifyOtp, isAuthenticated } = useCustomerAuth();
+  const { user, customerPhone, idToken, getIdToken, sendOtp, verifyOtp, isAuthenticated, isLoading: isAuthLoading, signOut } = useCustomerAuth();
 
   // Mode: one-time or subscription
   const [orderMode, setOrderMode] = useState<'one-time' | 'subscription'>('one-time');
@@ -77,18 +77,22 @@ export default function CheckoutClient() {
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [addressLabel, setAddressLabel] = useState<AddressLabel | string>('Home');
 
-  // Prefill phone from customerPhone or localStorage if available
+  // Prefill phone and name from customer auth or localStorage if available
   useEffect(() => {
     if (customerPhone && !phone) {
       setPhone(customerPhone.replace(/[^0-9]/g, '').slice(-10));
     }
-    try {
-      const savedName = localStorage.getItem('mahesh_customer_name');
-      if (savedName && !customerName) {
-        setCustomerName(savedName);
-      }
-    } catch {}
-  }, [customerPhone, phone, customerName]);
+    if (user?.displayName && !customerName) {
+      setCustomerName(user.displayName);
+    } else {
+      try {
+        const savedName = localStorage.getItem('mahesh_customer_name');
+        if (savedName && !customerName) {
+          setCustomerName(savedName);
+        }
+      } catch {}
+    }
+  }, [customerPhone, user?.displayName, phone, customerName]);
 
   // Select a saved address and populate form fields
   const applyAddressToForm = (addr: SavedAddress) => {
@@ -336,7 +340,7 @@ export default function CheckoutClient() {
         'Content-Type': 'application/json',
       };
 
-      const tokenToUse = authToken || (await getIdToken());
+      let tokenToUse = authToken || (await getIdToken());
       if (tokenToUse) {
         headers['Authorization'] = `Bearer ${tokenToUse}`;
       }
@@ -368,27 +372,47 @@ export default function CheckoutClient() {
         label: addressLabel,
       };
 
-      const response = await fetch('/api/orders', {
+      const orderPayload = {
+        customer: addressSnapshot,
+        items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+        expectedSubtotalPaise: subtotalPaise,
+        confirmPriceChange: forceConfirmPriceChange,
+        deliverySchedule: {
+          type: orderMode,
+          ...(orderMode === 'one-time'
+            ? { date: deliveryDate, timeSlot }
+            : {
+                daysOfWeek: selectedDays,
+                subscriptionStartDate,
+                timeSlot,
+              }),
+        },
+        paymentMethod,
+      };
+
+      let response = await fetch('/api/orders', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          customer: addressSnapshot,
-          items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-          expectedSubtotalPaise: subtotalPaise,
-          confirmPriceChange: forceConfirmPriceChange,
-          deliverySchedule: {
-            type: orderMode,
-            ...(orderMode === 'one-time'
-              ? { date: deliveryDate, timeSlot }
-              : {
-                  daysOfWeek: selectedDays,
-                  subscriptionStartDate,
-                  timeSlot,
-                }),
-          },
-          paymentMethod,
-        }),
+        body: JSON.stringify(orderPayload),
       });
+
+      // Handle 401: Safe token refresh retry if token expired
+      if (response.status === 401) {
+        try {
+          const freshRefreshedToken = await getIdToken(true);
+          if (freshRefreshedToken && freshRefreshedToken !== tokenToUse) {
+            tokenToUse = freshRefreshedToken;
+            headers['Authorization'] = `Bearer ${freshRefreshedToken}`;
+            response = await fetch('/api/orders', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(orderPayload),
+            });
+          }
+        } catch (refreshErr) {
+          console.warn('Safe token refresh failed:', refreshErr);
+        }
+      }
 
       const data = await response.json();
 
@@ -402,6 +426,13 @@ export default function CheckoutClient() {
           differencePaise: data.differencePaise,
           message: data.message,
         });
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (response.status === 401) {
+        setShowOtpModal(true);
+        setOtpError('Session expired or authentication required. Please verify your mobile number to complete your order.');
         setIsSubmitting(false);
         return;
       }
@@ -455,7 +486,7 @@ export default function CheckoutClient() {
       const result = await verifyOtp(otpCode);
       if (result.success) {
         setShowOtpModal(false);
-        const freshToken = await getIdToken();
+        const freshToken = await getIdToken(true);
         await executeOrderPlacement(freshToken);
       } else {
         setOtpError(result.error || 'Invalid OTP code. Please check and try again.');
@@ -512,29 +543,29 @@ export default function CheckoutClient() {
       return;
     }
 
-    // Check phone verification
-    if (!isPhoneVerified) {
-      setIsOtpSending(true);
-      setOtpError(null);
-      setOtpMessage(null);
-      setShowOtpModal(true);
-      try {
-        const res = await sendOtp(phone);
-        if (res.success) {
-          setOtpMessage(`Verification code sent via SMS to +91 ${cleanPhone}`);
-        } else {
-          setOtpError(res.error || 'Failed to send OTP SMS.');
-        }
-      } catch (err: any) {
-        setOtpError(err.message || 'Error sending verification code.');
-      } finally {
-        setIsOtpSending(false);
-      }
+    // 1. If customer is already authenticated, directly place order without prompt or OTP
+    if (isAuthenticated) {
+      await executeOrderPlacement(null, forceConfirmPriceChange);
       return;
     }
 
-    // If phone is already verified, proceed directly
-    await executeOrderPlacement(null, forceConfirmPriceChange);
+    // 2. Unauthenticated: require phone OTP verification before completing order
+    setIsOtpSending(true);
+    setOtpError(null);
+    setOtpMessage(null);
+    setShowOtpModal(true);
+    try {
+      const res = await sendOtp(phone);
+      if (res.success) {
+        setOtpMessage(`Verification code sent via SMS to +91 ${cleanPhone}`);
+      } else {
+        setOtpError(res.error || 'Failed to send OTP SMS.');
+      }
+    } catch (err: any) {
+      setOtpError(err.message || 'Error sending verification code.');
+    } finally {
+      setIsOtpSending(false);
+    }
   };
 
   return (
@@ -787,6 +818,24 @@ export default function CheckoutClient() {
 
           {/* SECTION 2: SAVED ADDRESS SELECTOR & DELIVERY ADDRESS */}
           <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-4">
+            {isAuthenticated && (
+              <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/70 text-xs text-botanical-900">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    Signed in with verified mobile <strong>{customerPhone || phone}</strong> • No OTP required
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="text-[11px] text-stone-500 hover:text-stone-800 underline font-medium"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
               <h2 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-botanical-700" />
@@ -962,10 +1011,10 @@ export default function CheckoutClient() {
                         className="w-full pl-9 pr-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600 font-mono"
                       />
                     </div>
-                    {isPhoneVerified ? (
+                    {isAuthenticated ? (
                       <span className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center gap-1">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        Mobile number verified
+                        Signed in with verified mobile • No OTP required
                       </span>
                     ) : (
                       <span className="text-[10px] text-stone-500 mt-0.5 block">
@@ -1252,9 +1301,14 @@ export default function CheckoutClient() {
                 <div className="w-4 h-4 border-2 border-cream-50 border-t-transparent rounded-full animate-spin"></div>
                 <span>Securing Order...</span>
               </div>
-            ) : (
+            ) : isAuthenticated ? (
               <>
                 <span>Place Order & Confirm Delivery</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            ) : (
+              <>
+                <span>Verify Mobile & Place Order</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}

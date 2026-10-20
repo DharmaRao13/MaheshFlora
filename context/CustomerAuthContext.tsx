@@ -22,7 +22,7 @@ interface CustomerAuthContextType {
   sendOtp: (phone: string) => Promise<{ success: boolean; error?: string }>;
   verifyOtp: (code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   signOut: () => Promise<void>;
-  getIdToken: () => Promise<string | null>;
+  getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
 }
 
 const CustomerAuthContext = createContext<CustomerAuthContextType | undefined>(undefined);
@@ -80,19 +80,23 @@ export function CustomerAuthProvider({ children }: { children: React.ReactNode }
     return () => unsubscribe();
   }, []);
 
-  // Helper to get fresh ID token
-  const getIdToken = useCallback(async (): Promise<string | null> => {
-    if (user) {
-      try {
-        const token = await user.getIdToken(true);
-        setIdToken(token);
-        return token;
-      } catch {
-        return idToken;
+  // Helper to get fresh or cached ID token with optional forceRefresh
+  const getIdToken = useCallback(
+    async (forceRefresh = false): Promise<string | null> => {
+      if (user) {
+        try {
+          const token = await user.getIdToken(forceRefresh);
+          setIdToken(token);
+          return token;
+        } catch (err) {
+          console.warn('Error fetching customer ID token:', err);
+          return idToken;
+        }
       }
-    }
-    return idToken;
-  }, [user, idToken]);
+      return idToken;
+    },
+    [user, idToken]
+  );
 
   // Setup RecaptchaVerifier
   const getOrCreateRecaptcha = useCallback((): RecaptchaVerifier | null => {

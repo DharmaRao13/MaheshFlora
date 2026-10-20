@@ -37,6 +37,11 @@ describe('Admin Confirmed Order Visibility & Hindu Calendar Tests', () => {
 
     const orderReq = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_admin_test',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify(orderPayload),
     });
 

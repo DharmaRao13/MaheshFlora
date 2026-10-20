@@ -260,7 +260,11 @@ describe('Daily Price Management System', () => {
     // 2. Customer attempts to submit with old expected subtotal of ₹50 (5000 paise)
     const reqWithOldPrice = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_sunita',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify({
         customer: {
           customerName: 'Sunita Reddy',
@@ -287,7 +291,11 @@ describe('Daily Price Management System', () => {
     // 3. Customer confirms the updated market price and resubmits
     const reqWithConfirmedPrice = new NextRequest('http://localhost:3000/api/orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-customer-uid': 'cust_sunita',
+        'x-customer-phone': '9876543210',
+      },
       body: JSON.stringify({
         customer: {
           customerName: 'Sunita Reddy',
