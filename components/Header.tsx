@@ -258,10 +258,10 @@ export default function Header() {
                   <div className="space-y-0.5">
                     {isAuthenticated && (
                       <Link
-                        href="/orders"
+                        href="/profile"
                         onClick={() => setAccountDropdownOpen(false)}
                         className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition ${
-                          isActive('/orders')
+                          isActive('/profile')
                             ? 'bg-botanical-100/80 text-botanical-900 font-semibold'
                             : 'text-stone-700 hover:bg-botanical-100/60 hover:text-botanical-900'
                         }`}

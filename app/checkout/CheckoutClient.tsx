@@ -64,6 +64,8 @@ export default function CheckoutClient() {
   const [phone, setPhone] = useState('');
   const [alternatePhone, setAlternatePhone] = useState('');
   const [flatNumber, setFlatNumber] = useState('');
+  const [tower, setTower] = useState('');
+  const [block, setBlock] = useState('');
   const [buildingTower, setBuildingTower] = useState('');
   const [street, setStreet] = useState('');
   const [apartmentCommunity, setApartmentCommunity] = useState('');
@@ -95,7 +97,9 @@ export default function CheckoutClient() {
     setPhone(addr.phone.replace(/[^0-9]/g, '').slice(-10));
     setAlternatePhone(addr.alternatePhone ? addr.alternatePhone.replace(/[^0-9]/g, '').slice(-10) : '');
     setFlatNumber(addr.flatNumber);
-    setBuildingTower('');
+    setTower(addr.tower || '');
+    setBlock(addr.block || '');
+    setBuildingTower([addr.tower, addr.block].filter(Boolean).join(' '));
     setStreet(addr.street || '');
     setApartmentCommunity(addr.apartmentCommunity || '');
     setLocality(addr.locality || '');
@@ -243,6 +247,8 @@ export default function CheckoutClient() {
         phone: phone.trim(),
         alternatePhone: alternatePhone.trim() || undefined,
         flatNumber: flatNumber.trim(),
+        tower: tower.trim() || undefined,
+        block: block.trim() || undefined,
         street: street.trim() || undefined,
         apartmentCommunity: apartmentCommunity.trim() || undefined,
         locality: locality.trim() || apartmentCommunity.trim(),
@@ -287,6 +293,8 @@ export default function CheckoutClient() {
         phone: phone.trim(),
         alternatePhone: alternatePhone.trim() || undefined,
         flatNumber: flatNumber.trim(),
+        tower: tower.trim() || undefined,
+        block: block.trim() || undefined,
         street: street.trim() || undefined,
         apartmentCommunity: apartmentCommunity.trim() || undefined,
         locality: locality.trim() || apartmentCommunity.trim(),
@@ -346,8 +354,10 @@ export default function CheckoutClient() {
         phone: phone.trim(),
         alternatePhone: alternatePhone.trim() || undefined,
         apartmentCommunity: apartmentCommunity.trim() || locality.trim(),
-        buildingTower: buildingTower.trim() || undefined,
+        buildingTower: [tower.trim(), block.trim()].filter(Boolean).join(' ') || buildingTower.trim() || undefined,
         flatNumber: flatNumber.trim(),
+        tower: tower.trim() || undefined,
+        block: block.trim() || undefined,
         street: street.trim() || undefined,
         locality: locality.trim() || apartmentCommunity.trim(),
         landmark: landmark.trim() || undefined,
@@ -788,6 +798,9 @@ export default function CheckoutClient() {
                   onClick={() => {
                     setSelectedAddressId('new');
                     setFlatNumber('');
+                    setTower('');
+                    setBlock('');
+                    setBuildingTower('');
                     setStreet('');
                     setApartmentCommunity('');
                     setLocality('');
@@ -839,7 +852,10 @@ export default function CheckoutClient() {
                             {addr.recipientName}
                           </p>
                           <p className="text-[11px] text-stone-600 line-clamp-2 mt-0.5 leading-snug">
-                            {addr.flatNumber}, {addr.apartmentCommunity ? `${addr.apartmentCommunity}, ` : ''}{addr.locality}
+                            {addr.flatNumber}
+                            {addr.tower ? `, Tower ${addr.tower}` : ''}
+                            {addr.block ? `, Block ${addr.block}` : ''}
+                            , {addr.apartmentCommunity ? `${addr.apartmentCommunity}, ` : ''}{addr.locality}
                           </p>
                           <p className="text-[10px] text-stone-500 font-mono mt-0.5">
                             {addr.phone}
@@ -959,35 +975,63 @@ export default function CheckoutClient() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-stone-700 mb-1">
-                      Flat / Door / House Number *
+                      Flat / House No. *
                     </label>
                     <input
                       type="text"
                       required
                       value={flatNumber}
                       onChange={(e) => setFlatNumber(e.target.value)}
-                      placeholder="e.g. Flat 804 / House 12"
+                      placeholder="e.g. Flat 804"
                       className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-stone-700 mb-1">
-                      Street / Road / Lane
+                      Tower (Optional)
                     </label>
                     <input
                       type="text"
-                      value={street}
-                      onChange={(e) => setStreet(e.target.value)}
-                      placeholder="e.g. 5th Main, 2nd Cross"
+                      value={tower}
+                      onChange={(e) => setTower(e.target.value)}
+                      placeholder="e.g. Tower 2"
+                      className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                      Block (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={block}
+                      onChange={(e) => setBlock(e.target.value)}
+                      placeholder="e.g. Block A"
                       className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
                     />
                   </div>
                 </div>
 
+                {/* Street / Road / Lane */}
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    Street / Road / Lane
+                  </label>
+                  <input
+                    type="text"
+                    value={street}
+                    onChange={(e) => setStreet(e.target.value)}
+                    placeholder="e.g. 5th Main, 2nd Cross"
+                    className="w-full px-3 py-2 rounded-xl border border-botanical-200 bg-cream-50 text-xs sm:text-sm text-botanical-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+                  />
+                </div>
+
+                {/* Apartment Community & Locality */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-stone-700 mb-1">

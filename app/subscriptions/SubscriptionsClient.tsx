@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Calendar,
@@ -16,21 +16,49 @@ import {
   Sparkles,
   Package,
   CalendarX2,
-  ShieldCheck
+  ShieldCheck,
 } from 'lucide-react';
 import { Subscription } from '@/types';
 import { formatINR } from '@/lib/config';
+import { useCustomerAuth } from '@/context/CustomerAuthContext';
 
 interface Props {
   initialSubscriptions: Subscription[];
 }
 
 export default function SubscriptionsClient({ initialSubscriptions }: Props) {
+  const { user, customerPhone, getIdToken, isAuthenticated } = useCustomerAuth();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>(initialSubscriptions);
   const [searchPhone, setSearchPhone] = useState('');
   const [searched, setSearched] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+
+  // Auto-fetch for authenticated customer
+  useEffect(() => {
+    if (isAuthenticated) {
+      (async () => {
+        try {
+          const token = await getIdToken();
+          const headers: Record<string, string> = {};
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          if (user?.uid) headers['x-customer-uid'] = user.uid;
+          if (customerPhone) headers['x-customer-phone'] = customerPhone.replace(/\D/g, '').slice(-10);
+
+          const res = await fetch('/api/subscriptions', { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.subscriptions) {
+              setSubscriptions(data.subscriptions);
+              setSearched(true);
+            }
+          }
+        } catch (err) {
+          console.warn('Could not auto-fetch customer subscriptions:', err);
+        }
+      })();
+    }
+  }, [isAuthenticated, getIdToken, user?.uid, customerPhone]);
 
   // Generate the next 14 calendar dates
   const generateUpcomingDates = () => {
@@ -70,9 +98,15 @@ export default function SubscriptionsClient({ initialSubscriptions }: Props) {
     setFeedbackMessage(null);
 
     try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (user?.uid) headers['x-customer-uid'] = user.uid;
+      if (customerPhone) headers['x-customer-phone'] = customerPhone.replace(/\D/g, '').slice(-10);
+
       const res = await fetch(`/api/subscriptions/${subId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ action, skipDate }),
       });
 
@@ -234,7 +268,7 @@ export default function SubscriptionsClient({ initialSubscriptions }: Props) {
                         </span>
                       </div>
                       <p className="text-xs text-stone-600 mt-1">
-                        Subscriber: <strong>{sub.customer.customerName}</strong> ({sub.customer.flatNumber}, {sub.customer.apartmentCommunity}) • Phone: {sub.customer.phone}
+                        Subscriber: <strong>{sub.customer.customerName}</strong> ({sub.customer.flatNumber}{sub.customer.tower ? `, Tower ${sub.customer.tower}` : ''}{sub.customer.block ? `, Block ${sub.customer.block}` : ''}, {sub.customer.apartmentCommunity}) • Phone: {sub.customer.phone}
                       </p>
                     </div>
 

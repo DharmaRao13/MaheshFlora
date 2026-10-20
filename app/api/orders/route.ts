@@ -9,6 +9,8 @@ import {
   getOrdersByPhone,
   getOrdersByCustomerUid,
   getOrdersByIds,
+  getSavedAddressesByUid,
+  createSavedAddress,
 } from '@/lib/db/store';
 import {
   validateIndianPhone,
@@ -270,6 +272,14 @@ export async function POST(req: NextRequest) {
       apartmentCommunity: customer.apartmentCommunity?.trim() || communityOrLocality,
       locality: customer.locality?.trim() || communityOrLocality,
       flatNumber: customer.flatNumber.trim(),
+      tower: customer.tower?.trim() || undefined,
+      block: customer.block?.trim() || undefined,
+      buildingTower: customer.buildingTower?.trim() || [customer.tower?.trim(), customer.block?.trim()].filter(Boolean).join(' ') || '',
+      street: customer.street?.trim() || undefined,
+      landmark: customer.landmark?.trim() || undefined,
+      city: customer.city?.trim() || 'Bengaluru',
+      state: customer.state?.trim() || 'Karnataka',
+      pincode: customer.pincode?.trim() || '560001',
       customerName: (customer.customerName || customer.recipientName || '').trim(),
       recipientName: (customer.recipientName || customer.customerName || '').trim(),
       uid: verifiedUid,
@@ -334,10 +344,62 @@ export async function POST(req: NextRequest) {
       savedSubscription = await createSubscription(newSubscription);
     }
 
+    // Auto-save delivery address for authenticated customer on first order or when requested
+    let savedAddressResult = null;
+    let addressSaveWarning: string | undefined = undefined;
+
+    if (verifiedUid) {
+      try {
+        const existingAddresses = await getSavedAddressesByUid(verifiedUid);
+        const shouldSaveAddress = existingAddresses.length === 0 || Boolean(body.saveAddressForFuture);
+
+        if (shouldSaveAddress) {
+          const isDuplicate = existingAddresses.some(
+            (a) =>
+              a.flatNumber.toLowerCase() === validatedCustomer.flatNumber.toLowerCase() &&
+              (a.tower || '').toLowerCase() === (validatedCustomer.tower || '').toLowerCase() &&
+              (a.block || '').toLowerCase() === (validatedCustomer.block || '').toLowerCase() &&
+              (a.locality || a.apartmentCommunity || '').toLowerCase() ===
+                (validatedCustomer.locality || validatedCustomer.apartmentCommunity || '').toLowerCase()
+          );
+
+          if (!isDuplicate) {
+            const addressToSave = {
+              uid: verifiedUid,
+              recipientName: validatedCustomer.recipientName || validatedCustomer.customerName || 'Customer',
+              phone: validatedCustomer.phone,
+              alternatePhone: customer.alternatePhone?.trim() || undefined,
+              flatNumber: validatedCustomer.flatNumber,
+              tower: validatedCustomer.tower,
+              block: validatedCustomer.block,
+              street: validatedCustomer.street,
+              apartmentCommunity: validatedCustomer.apartmentCommunity,
+              locality: validatedCustomer.locality || validatedCustomer.apartmentCommunity,
+              landmark: validatedCustomer.landmark,
+              city: validatedCustomer.city || 'Bengaluru',
+              state: validatedCustomer.state || 'Karnataka',
+              pincode: validatedCustomer.pincode || '560001',
+              deliveryInstructions: customer.deliveryInstructions?.trim() || undefined,
+              label: body.addressLabel || 'Home',
+              isDefault: existingAddresses.length === 0,
+            };
+
+            savedAddressResult = await createSavedAddress(addressToSave);
+          }
+        }
+      } catch (addrErr: any) {
+        console.warn('Auto-save delivery address warning (order preserved):', addrErr);
+        addressSaveWarning =
+          'Order confirmed, but we could not automatically save this delivery address to your account.';
+      }
+    }
+
     return NextResponse.json({
       success: true,
       order: savedOrder,
       subscription: savedSubscription,
+      savedAddress: savedAddressResult,
+      addressSaveWarning,
     });
   } catch (error: any) {
     console.error('Order creation error:', error);

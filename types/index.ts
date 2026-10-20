@@ -30,6 +30,15 @@ export interface CartItem {
 
 export type AddressLabel = 'Home' | 'Work' | 'Parents' | 'Mandir/Pooja Room' | 'Other';
 
+export interface UserProfile {
+  uid: string;
+  phone: string; // trusted verified mobile number from auth
+  displayName?: string;
+  email?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface SavedAddress {
   id: string;
   uid: string;
@@ -37,6 +46,8 @@ export interface SavedAddress {
   phone: string;
   alternatePhone?: string;
   flatNumber: string;
+  tower?: string;
+  block?: string;
   street?: string;
   apartmentCommunity?: string;
   locality: string;
@@ -57,7 +68,9 @@ export interface Address {
   recipientName?: string;
   phone: string;
   apartmentCommunity: string;
-  buildingTower: string;
+  buildingTower?: string;
+  tower?: string;
+  block?: string;
   flatNumber: string;
   street?: string;
   locality?: string;

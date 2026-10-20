@@ -331,6 +331,9 @@ export function validateSavedAddress(input: Record<string, any>): {
     return { valid: false, error: 'House / Flat number is required' };
   }
 
+  const tower = typeof input.tower === 'string' && input.tower.trim() ? input.tower.trim() : undefined;
+  const block = typeof input.block === 'string' && input.block.trim() ? input.block.trim() : undefined;
+
   const locality = typeof input.locality === 'string' ? input.locality.trim() : (typeof input.apartmentCommunity === 'string' ? input.apartmentCommunity.trim() : '');
   if (!locality) {
     return { valid: false, error: 'Street / Locality or Apartment name is required' };
@@ -357,6 +360,8 @@ export function validateSavedAddress(input: Record<string, any>): {
       phone: phoneRes.formatted,
       alternatePhone,
       flatNumber,
+      tower,
+      block,
       street,
       locality,
       apartmentCommunity,
@@ -369,5 +374,35 @@ export function validateSavedAddress(input: Record<string, any>): {
       isDefault,
     },
   };
+}
+
+/**
+ * Formats flat number, tower, block, or building into a unified display line.
+ */
+export function formatAddressLine(addr: {
+  flatNumber?: string;
+  tower?: string;
+  block?: string;
+  buildingTower?: string;
+  street?: string;
+}): string {
+  const parts: string[] = [];
+  if (addr.flatNumber) {
+    const flat = addr.flatNumber.trim();
+    parts.push(
+      /^(flat|house|villa|door|no\.?|unit)\b/i.test(flat) ? flat : `Flat ${flat}`
+    );
+  }
+  if (addr.tower) {
+    const t = addr.tower.trim();
+    parts.push(/^tower\b/i.test(t) ? t : `Tower ${t}`);
+  }
+  if (addr.block) {
+    const b = addr.block.trim();
+    parts.push(/^block\b/i.test(b) ? b : `Block ${b}`);
+  }
+  if (!addr.tower && !addr.block && addr.buildingTower) parts.push(addr.buildingTower.trim());
+  if (addr.street) parts.push(addr.street.trim());
+  return parts.join(', ');
 }
 

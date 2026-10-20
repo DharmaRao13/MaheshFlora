@@ -847,9 +847,24 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
             <span>Delivery Address</span>
           </div>
           <div className="text-stone-700 space-y-0.5">
-            <div className="font-semibold text-botanical-900">{order.customer.customerName}</div>
-            <div>{order.customer.flatNumber}, {order.customer.buildingTower}</div>
-            <div>{order.customer.apartmentCommunity}</div>
+            <div className="font-semibold text-botanical-900">{order.customer.customerName || order.customer.recipientName}</div>
+            <div>
+              {order.customer.flatNumber}
+              {order.customer.tower ? `, Tower ${order.customer.tower}` : ''}
+              {order.customer.block ? `, Block ${order.customer.block}` : ''}
+              {order.customer.buildingTower && !order.customer.tower && !order.customer.block ? `, ${order.customer.buildingTower}` : ''}
+              {order.customer.street ? `, ${order.customer.street}` : ''}
+            </div>
+            <div>
+              {order.customer.apartmentCommunity ? `${order.customer.apartmentCommunity}, ` : ''}
+              {order.customer.locality || ''}
+            </div>
+            {order.customer.landmark && (
+              <div className="text-stone-500">Landmark: {order.customer.landmark}</div>
+            )}
+            {(order.customer.city || order.customer.pincode) && (
+              <div className="text-stone-500">{order.customer.city || 'Bengaluru'} - {order.customer.pincode}</div>
+            )}
             <div>Phone: {order.customer.phone}</div>
             {order.customer.deliveryInstructions && (
               <div className="text-[11px] text-stone-500 italic mt-1">

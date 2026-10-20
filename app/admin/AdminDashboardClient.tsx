@@ -819,7 +819,7 @@ export default function AdminDashboardClient({
                       </div>
 
                       <div className="text-stone-600 text-[11px]">
-                        <strong>Address:</strong> {order.customer.flatNumber}, {order.customer.buildingTower}, {order.customer.apartmentCommunity}
+                        <strong>Address:</strong> {order.customer.flatNumber}{order.customer.tower ? `, Tower ${order.customer.tower}` : ''}{order.customer.block ? `, Block ${order.customer.block}` : ''}{order.customer.buildingTower && !order.customer.tower && !order.customer.block ? `, ${order.customer.buildingTower}` : ''}, {order.customer.apartmentCommunity}
                       </div>
 
                       <div className="text-[11px] text-stone-500">
@@ -1359,7 +1359,12 @@ export default function AdminDashboardClient({
 
                     <div>
                       <span className="font-semibold text-botanical-900 block">Delivery Address:</span>
-                      <div>{order.customer.flatNumber}, {order.customer.buildingTower}</div>
+                      <div>
+                        {order.customer.flatNumber}
+                        {order.customer.tower ? `, Tower ${order.customer.tower}` : ''}
+                        {order.customer.block ? `, Block ${order.customer.block}` : ''}
+                        {order.customer.buildingTower && !order.customer.tower && !order.customer.block ? `, ${order.customer.buildingTower}` : ''}
+                      </div>
                       <div>{order.customer.apartmentCommunity}</div>
                       {order.customer.deliveryInstructions && (
                         <div className="text-[11px] text-stone-500 italic">
@@ -1653,27 +1658,40 @@ export default function AdminDashboardClient({
               <p className="text-xs text-stone-500">No subscriptions created yet.</p>
             ) : (
               subscriptions.map((sub) => (
-                <div key={sub.id} className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-2 text-xs">
+                <div key={sub.id} className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-2.5 text-xs">
                   <div className="flex items-center justify-between pb-2 border-b border-botanical-100">
                     <div>
                       <span className="font-bold text-sm text-botanical-900">#{sub.id}</span>
                       <span className="text-stone-700 ml-2 font-semibold">{sub.customer.customerName}</span>
                       <span className="text-stone-500 ml-1">({sub.customer.apartmentCommunity})</span>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                       sub.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
                     }`}>
                       {sub.status}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-stone-700">
-                    <div><strong>Days:</strong> {sub.daysOfWeek.join(', ')}</div>
-                    <div><strong>Slot:</strong> {sub.timeSlot}</div>
-                    <div><strong>Est Weekly:</strong> {formatINR(sub.estimatedWeeklyPaise)}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-stone-700">
+                    <div><strong>Phone:</strong> {sub.customer.phone}</div>
+                    <div><strong>Start Date:</strong> {sub.startDate}</div>
+                    <div><strong>Slot:</strong> {sub.timeSlot === 'morning' ? 'Morning (6:00 - 8:30 AM)' : 'Evening Slot'}</div>
+                    <div><strong>Price:</strong> <span className="font-bold text-botanical-900">{formatINR(sub.estimatedWeeklyPaise)}/week</span></div>
                   </div>
 
-                  {sub.skippedDates.length > 0 && (
+                  <div className="text-stone-600 bg-white/70 p-2.5 rounded-xl border border-botanical-100 space-y-1">
+                    <div>
+                      <strong>Address:</strong> {sub.customer.flatNumber}
+                      {sub.customer.tower ? `, Tower ${sub.customer.tower}` : ''}
+                      {sub.customer.block ? `, Block ${sub.customer.block}` : ''}
+                      {sub.customer.buildingTower && !sub.customer.tower && !sub.customer.block ? `, ${sub.customer.buildingTower}` : ''}
+                      , {sub.customer.apartmentCommunity}{sub.customer.locality && sub.customer.locality !== sub.customer.apartmentCommunity ? `, ${sub.customer.locality}` : ''}
+                      {sub.customer.city ? `, ${sub.customer.city}` : ''} - {sub.customer.pincode || '560001'}
+                    </div>
+                    <div><strong>Days:</strong> {sub.daysOfWeek.join(', ')}</div>
+                  </div>
+
+                  {sub.skippedDates && sub.skippedDates.length > 0 && (
                     <div className="text-[11px] text-rose-700 bg-rose-50 p-2 rounded-lg">
                       Skipped Dates: {sub.skippedDates.join(', ')}
                     </div>
@@ -1716,7 +1734,7 @@ export default function AdminDashboardClient({
 
                   <div className="text-stone-700">
                     <div><strong>Delivery Date:</strong> {b.festivalDate} ({b.preferredSlot})</div>
-                    <div><strong>Address:</strong> {b.customer.flatNumber}, {b.customer.buildingTower}, {b.customer.apartmentCommunity} • Phone: {b.customer.phone}</div>
+                    <div><strong>Address:</strong> {b.customer.flatNumber}{b.customer.tower ? `, Tower ${b.customer.tower}` : ''}{b.customer.block ? `, Block ${b.customer.block}` : ''}{b.customer.buildingTower && !b.customer.tower && !b.customer.block ? `, ${b.customer.buildingTower}` : ''}, {b.customer.apartmentCommunity} • Phone: {b.customer.phone}</div>
                     {b.specialGarlandNotes && (
                       <div className="mt-1 text-botanical-800 bg-cream-50 p-2 rounded-lg border border-botanical-100">
                         <strong>Special Request:</strong> {b.specialGarlandNotes}

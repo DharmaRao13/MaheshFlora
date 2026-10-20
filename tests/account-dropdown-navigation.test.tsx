@@ -97,7 +97,7 @@ describe('Mahesh Flora — Account & Profile Dropdown Navigation', () => {
     // Shows My Profile link
     const profileLinks = screen.getAllByRole('link', { name: /My Profile/i });
     expect(profileLinks.length).toBeGreaterThanOrEqual(1);
-    expect(profileLinks[0]).toHaveAttribute('href', '/orders');
+    expect(profileLinks[0]).toHaveAttribute('href', '/profile');
 
     // Shows Sign Out button
     const signOutBtn = screen.getByRole('button', { name: /Sign Out/i });

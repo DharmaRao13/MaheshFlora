@@ -127,7 +127,7 @@ describe('Mahesh Flora — Responsive Navigation & Mobile Bottom Nav', () => {
     expect(screen.getByText(/Verified Customer/i)).toBeInTheDocument();
 
     // Displays My Profile
-    expect(screen.getByRole('link', { name: /My Profile/i })).toHaveAttribute('href', '/orders');
+    expect(screen.getByRole('link', { name: /My Profile/i })).toHaveAttribute('href', '/profile');
 
     // Displays Sign Out button
     const signOutBtn = screen.getByRole('button', { name: /Sign Out/i });

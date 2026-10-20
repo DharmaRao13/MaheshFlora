@@ -227,10 +227,10 @@ export default function MobileBottomNav() {
             <div className="space-y-1">
               {isAuthenticated && (
                 <Link
-                  href="/orders"
+                  href="/profile"
                   onClick={() => setAccountSheetOpen(false)}
                   className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition ${
-                    isActive('/orders') ? 'bg-botanical-100 text-botanical-900 font-semibold' : 'text-stone-700 hover:bg-cream-200/60'
+                    isActive('/profile') ? 'bg-botanical-100 text-botanical-900 font-semibold' : 'text-stone-700 hover:bg-cream-200/60'
                   }`}
                 >
                   <User className="w-4 h-4 text-botanical-700" />

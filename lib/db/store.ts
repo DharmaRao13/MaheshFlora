@@ -13,6 +13,7 @@ import {
   DailyPriceItem,
   DailyPriceRecord,
   SavedAddress,
+  UserProfile,
 } from '@/types';
 import { INITIAL_PRODUCTS, INITIAL_FESTIVALS } from './seed';
 import { DEFAULT_SETTINGS } from '../config';
@@ -85,6 +86,7 @@ interface DatabaseData {
   dailyPrices?: DailyPriceRecord;
   dailyPriceHistory?: DailyPriceRecord[];
   addresses?: SavedAddress[];
+  profiles?: UserProfile[];
 }
 
 // In-memory cache + persistent JSON file for safe, reproducible local development
@@ -104,6 +106,7 @@ function initializeDb(): DatabaseData {
     dailyPrices: buildDefaultDailyPrices(initialProducts),
     dailyPriceHistory: [],
     addresses: [],
+    profiles: [],
   };
   memoryDb = initial;
   saveDb(initial);
@@ -129,6 +132,7 @@ function getDb(): DatabaseData {
         dailyPrices: parsed.dailyPrices || buildDefaultDailyPrices(prods),
         dailyPriceHistory: parsed.dailyPriceHistory || [],
         addresses: parsed.addresses || [],
+        profiles: parsed.profiles || [],
       };
       return memoryDb;
     }
@@ -592,82 +596,294 @@ export async function updateOrderPaymentStatus(
 // ==================== SUBSCRIPTIONS ====================
 
 export async function getSubscriptions(): Promise<Subscription[]> {
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const snap = await firestore.collection('subscriptions').orderBy('createdAt', 'desc').get();
+      if (!snap.empty) {
+        return snap.docs.map((doc: any) => doc.data() as Subscription);
+      }
+      return [];
+    } catch (err) {
+      console.warn('Firestore getSubscriptions with orderBy failed, attempting un-ordered query:', err);
+      try {
+        const fallbackSnap = await firestore.collection('subscriptions').get();
+        if (!fallbackSnap.empty) {
+          const list: Subscription[] = fallbackSnap.docs.map((doc: any) => doc.data() as Subscription);
+          return list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        }
+        return [];
+      } catch (innerErr) {
+        console.warn('Firestore getSubscriptions fallback error, falling back to local store:', innerErr);
+      }
+    }
+  }
+
   const db = getDb();
-  return [...db.subscriptions].sort(
+  return [...(db.subscriptions || [])].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 }
 
 export async function getSubscriptionById(id: string): Promise<Subscription | null> {
+  if (!id) return null;
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const doc = await firestore.collection('subscriptions').doc(id).get();
+      if (doc.exists) {
+        return doc.data() as Subscription;
+      }
+    } catch (err) {
+      console.warn('Firestore getSubscriptionById error:', err);
+    }
+  }
+
   const db = getDb();
-  return db.subscriptions.find((s) => s.id === id) || null;
+  return (db.subscriptions || []).find((s) => s.id === id) || null;
 }
 
 export async function getSubscriptionsByPhone(phone: string): Promise<Subscription[]> {
-  const db = getDb();
   const cleanPhone = phone.replace(/[^0-9]/g, '');
-  return db.subscriptions.filter(
-    (s) => s.customer.phone.replace(/[^0-9]/g, '').endsWith(cleanPhone.slice(-10))
+  if (!cleanPhone) return [];
+
+  const allSubs = await getSubscriptions();
+  return allSubs.filter((s) =>
+    (s.customer?.phone || '').replace(/[^0-9]/g, '').endsWith(cleanPhone.slice(-10))
   );
+}
+
+export async function getSubscriptionsByCustomerUid(uid: string): Promise<Subscription[]> {
+  if (!uid) return [];
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const snap = await firestore.collection('subscriptions').where('customer.uid', '==', uid).get();
+      if (!snap.empty) {
+        const list: Subscription[] = snap.docs.map((doc: any) => doc.data() as Subscription);
+        return list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      }
+    } catch (err) {
+      console.warn('Firestore getSubscriptionsByCustomerUid error:', err);
+    }
+  }
+
+  const db = getDb();
+  return (db.subscriptions || []).filter((s) => s.customer?.uid === uid);
 }
 
 export async function createSubscription(subscription: Subscription): Promise<Subscription> {
   const db = getDb();
+  if (!db.subscriptions) db.subscriptions = [];
+
+  // Deduplication check: if subscription with this ID already exists, return it
+  const existing = db.subscriptions.find((s) => s.id === subscription.id);
+  if (existing) {
+    return existing;
+  }
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const existingDoc = await firestore.collection('subscriptions').doc(subscription.id).get();
+      if (existingDoc.exists) {
+        return existingDoc.data() as Subscription;
+      }
+    } catch (err) {
+      console.warn('Firestore subscription deduplication check warning:', err);
+    }
+
+    const cleaned = sanitizeForFirestore(subscription);
+    try {
+      await firestore.collection('subscriptions').doc(subscription.id).set(cleaned);
+    } catch (err: any) {
+      console.error(`[Subscription Persistence Failed] Sub ID: ${subscription.id}. Error:`, err?.message || err);
+      throw new Error(`Failed to securely save subscription ${subscription.id} to database. Please try again.`);
+    }
+  }
+
   db.subscriptions.push(subscription);
   saveDb(db);
   return subscription;
 }
 
 export async function pauseSubscription(id: string): Promise<Subscription> {
-  const db = getDb();
-  const sub = db.subscriptions.find((s) => s.id === id);
+  const sub = await getSubscriptionById(id);
   if (!sub) {
     throw new Error(`Subscription not found: ${id}`);
   }
-  sub.status = 'paused';
-  sub.pausedAt = new Date().toISOString();
-  sub.updatedAt = new Date().toISOString();
+  const now = new Date().toISOString();
+  const updated: Subscription = {
+    ...sub,
+    status: 'paused',
+    pausedAt: now,
+    updatedAt: now,
+  };
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('subscriptions').doc(id).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore pauseSubscription error:', err);
+    }
+  }
+
+  const db = getDb();
+  const idx = (db.subscriptions || []).findIndex((s) => s.id === id);
+  if (idx !== -1) {
+    db.subscriptions[idx] = updated;
+  }
   saveDb(db);
-  return sub;
+  return updated;
 }
 
 export async function resumeSubscription(id: string): Promise<Subscription> {
-  const db = getDb();
-  const sub = db.subscriptions.find((s) => s.id === id);
+  const sub = await getSubscriptionById(id);
   if (!sub) {
     throw new Error(`Subscription not found: ${id}`);
   }
-  sub.status = 'active';
-  delete sub.pausedAt;
-  sub.updatedAt = new Date().toISOString();
+  const now = new Date().toISOString();
+  const updated: Subscription = {
+    ...sub,
+    status: 'active',
+    updatedAt: now,
+  };
+  delete (updated as any).pausedAt;
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('subscriptions').doc(id).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore resumeSubscription error:', err);
+    }
+  }
+
+  const db = getDb();
+  const idx = (db.subscriptions || []).findIndex((s) => s.id === id);
+  if (idx !== -1) {
+    db.subscriptions[idx] = updated;
+  }
   saveDb(db);
-  return sub;
+  return updated;
 }
 
 export async function skipSubscriptionDate(id: string, date: string): Promise<Subscription> {
-  const db = getDb();
-  const sub = db.subscriptions.find((s) => s.id === id);
+  const sub = await getSubscriptionById(id);
   if (!sub) {
     throw new Error(`Subscription not found: ${id}`);
   }
-  if (!sub.skippedDates.includes(date)) {
-    sub.skippedDates.push(date);
-    sub.updatedAt = new Date().toISOString();
-    saveDb(db);
+  const now = new Date().toISOString();
+  const skipped = [...(sub.skippedDates || [])];
+  if (!skipped.includes(date)) {
+    skipped.push(date);
   }
-  return sub;
+
+  const updated: Subscription = {
+    ...sub,
+    skippedDates: skipped,
+    updatedAt: now,
+  };
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('subscriptions').doc(id).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore skipSubscriptionDate error:', err);
+    }
+  }
+
+  const db = getDb();
+  const idx = (db.subscriptions || []).findIndex((s) => s.id === id);
+  if (idx !== -1) {
+    db.subscriptions[idx] = updated;
+  }
+  saveDb(db);
+  return updated;
 }
 
 export async function cancelSubscription(id: string): Promise<Subscription> {
-  const db = getDb();
-  const sub = db.subscriptions.find((s) => s.id === id);
+  const sub = await getSubscriptionById(id);
   if (!sub) {
     throw new Error(`Subscription not found: ${id}`);
   }
-  sub.status = 'cancelled';
-  sub.updatedAt = new Date().toISOString();
+  const now = new Date().toISOString();
+  const updated: Subscription = {
+    ...sub,
+    status: 'cancelled',
+    updatedAt: now,
+  };
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('subscriptions').doc(id).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore cancelSubscription error:', err);
+    }
+  }
+
+  const db = getDb();
+  const idx = (db.subscriptions || []).findIndex((s) => s.id === id);
+  if (idx !== -1) {
+    db.subscriptions[idx] = updated;
+  }
   saveDb(db);
-  return sub;
+  return updated;
+}
+
+// ==================== USER PROFILES ====================
+
+export async function getUserProfileByUid(uid: string): Promise<UserProfile | null> {
+  if (!uid) return null;
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const doc = await firestore.collection('profiles').doc(uid).get();
+      if (doc.exists) {
+        return doc.data() as UserProfile;
+      }
+    } catch (err) {
+      console.warn('Firestore getUserProfileByUid error:', err);
+    }
+  }
+
+  const db = getDb();
+  return (db.profiles || []).find((p) => p.uid === uid) || null;
+}
+
+export async function saveUserProfile(profile: UserProfile): Promise<UserProfile> {
+  const now = new Date().toISOString();
+  const updated: UserProfile = {
+    ...profile,
+    updatedAt: now,
+    createdAt: profile.createdAt || now,
+  };
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('profiles').doc(profile.uid).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore saveUserProfile error:', err);
+    }
+  }
+
+  const db = getDb();
+  if (!db.profiles) db.profiles = [];
+  const idx = db.profiles.findIndex((p) => p.uid === profile.uid);
+  if (idx !== -1) {
+    db.profiles[idx] = updated;
+  } else {
+    db.profiles.push(updated);
+  }
+  saveDb(db);
+  return updated;
 }
 
 // ==================== FESTIVALS ====================
@@ -1185,6 +1401,7 @@ export function _resetDbForTesting() {
     dailyPrices: buildDefaultDailyPrices(prods),
     dailyPriceHistory: [],
     addresses: [],
+    profiles: [],
   };
   if (fs.existsSync(DATA_FILE)) {
     try {
