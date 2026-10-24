@@ -1194,6 +1194,29 @@ export default function CheckoutClient() {
 
             <div className="space-y-2.5">
               <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition ${
+                paymentMethod === 'razorpay'
+                  ? 'border-botanical-700 bg-botanical-50/80 ring-2 ring-botanical-600/20'
+                  : 'border-botanical-200 bg-cream-50 hover:bg-cream-200/50'
+              }`}>
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value="razorpay"
+                  checked={paymentMethod === 'razorpay'}
+                  onChange={() => setPaymentMethod('razorpay')}
+                  className="mt-1 text-botanical-700 focus:ring-botanical-500"
+                />
+                <div>
+                  <div className="text-xs sm:text-sm font-bold text-stone-900 flex items-center gap-1.5">
+                    <span>Pay Securely Online (UPI, Cards, NetBanking)</span>
+                  </div>
+                  <p className="text-[11px] text-stone-600 mt-0.5">
+                    Instant payment confirmation via secure checkout. Supports UPI (Google Pay, PhonePe, Paytm), Debit/Credit Cards, and NetBanking.
+                  </p>
+                </div>
+              </label>
+
+              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition ${
                 paymentMethod === 'whatsapp_upi'
                   ? 'border-emerald-600 bg-emerald-50/80 ring-2 ring-emerald-500/20'
                   : 'border-botanical-200 bg-cream-50 hover:bg-cream-200/50'

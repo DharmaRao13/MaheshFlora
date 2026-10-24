@@ -554,24 +554,84 @@ export async function cancelOrder(id: string, reason?: string): Promise<Order> {
   return finalOrder;
 }
 
-export async function updateOrderPaymentStatus(
+export interface OrderPaymentMeta {
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
+  paymentProvider?: string;
+  providerOrderId?: string;
+  providerPaymentId?: string;
+}
+
+export async function attachOrderPaymentSession(
   id: string,
-  paymentStatus: PaymentStatus,
-  meta?: { razorpayPaymentId?: string; razorpayOrderId?: string }
+  sessionMeta: {
+    provider: string;
+    providerOrderId: string;
+    razorpayOrderId?: string;
+  }
 ): Promise<Order> {
   const now = new Date().toISOString();
   const db = getDb();
   const order = db.orders.find((o) => o.id === id);
   if (order) {
+    order.paymentProvider = sessionMeta.provider;
+    order.providerOrderId = sessionMeta.providerOrderId;
+    order.razorpayOrderId = sessionMeta.razorpayOrderId || sessionMeta.providerOrderId;
+    order.updatedAt = now;
+    saveDb(db);
+  }
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const updates: any = {
+        paymentProvider: sessionMeta.provider,
+        providerOrderId: sessionMeta.providerOrderId,
+        razorpayOrderId: sessionMeta.razorpayOrderId || sessionMeta.providerOrderId,
+        updatedAt: now,
+      };
+      await firestore.collection('orders').doc(id).set(updates, { merge: true });
+    } catch (err) {
+      console.warn('Firestore attachOrderPaymentSession error:', err);
+    }
+  }
+
+  const finalOrder = await getOrderById(id);
+  if (!finalOrder) {
+    throw new Error(`Order not found: ${id}`);
+  }
+  return finalOrder;
+}
+
+export async function updateOrderPaymentStatus(
+  id: string,
+  paymentStatus: PaymentStatus,
+  meta?: OrderPaymentMeta
+): Promise<Order> {
+  const now = new Date().toISOString();
+  const db = getDb();
+  const order = db.orders.find((o) => o.id === id);
+  if (order) {
+    // CRITICAL: Never downgrade an already paid order to failed or unpaid
+    if (order.paymentStatus === 'paid' && paymentStatus !== 'paid' && paymentStatus !== 'refunded') {
+      return order;
+    }
+
     order.paymentStatus = paymentStatus;
+    if (meta?.paymentProvider) order.paymentProvider = meta.paymentProvider;
+    if (meta?.providerPaymentId) order.providerPaymentId = meta.providerPaymentId;
+    if (meta?.providerOrderId) order.providerOrderId = meta.providerOrderId;
+
     if (meta?.razorpayPaymentId) {
       order.razorpayPaymentId = meta.razorpayPaymentId;
+      order.providerPaymentId = order.providerPaymentId || meta.razorpayPaymentId;
     }
     if (meta?.razorpayOrderId) {
       order.razorpayOrderId = meta.razorpayOrderId;
+      order.providerOrderId = order.providerOrderId || meta.razorpayOrderId;
     }
     if (paymentStatus === 'paid') {
-      order.paidAt = now;
+      order.paidAt = order.paidAt || now;
       if (order.orderStatus === 'pending_confirmation') {
         order.orderStatus = 'confirmed';
       }
@@ -583,14 +643,32 @@ export async function updateOrderPaymentStatus(
   const firestore = getFirestoreInstance();
   if (firestore) {
     try {
+      // Check Firestore state as well to prevent downgrading paid order
+      const docSnap = await firestore.collection('orders').doc(id).get();
+      if (docSnap.exists) {
+        const existingData = docSnap.data() as Order;
+        if (existingData.paymentStatus === 'paid' && paymentStatus !== 'paid' && paymentStatus !== 'refunded') {
+          return existingData;
+        }
+      }
+
       const updates: any = {
         paymentStatus,
         updatedAt: now,
       };
-      if (meta?.razorpayPaymentId) updates.razorpayPaymentId = meta.razorpayPaymentId;
-      if (meta?.razorpayOrderId) updates.razorpayOrderId = meta.razorpayOrderId;
+      if (meta?.paymentProvider) updates.paymentProvider = meta.paymentProvider;
+      if (meta?.providerPaymentId) updates.providerPaymentId = meta.providerPaymentId;
+      if (meta?.providerOrderId) updates.providerOrderId = meta.providerOrderId;
+      if (meta?.razorpayPaymentId) {
+        updates.razorpayPaymentId = meta.razorpayPaymentId;
+        updates.providerPaymentId = updates.providerPaymentId || meta.razorpayPaymentId;
+      }
+      if (meta?.razorpayOrderId) {
+        updates.razorpayOrderId = meta.razorpayOrderId;
+        updates.providerOrderId = updates.providerOrderId || meta.razorpayOrderId;
+      }
       if (paymentStatus === 'paid') {
-        updates.paidAt = now;
+        updates.paidAt = updates.paidAt || now;
         updates.orderStatus = 'confirmed';
       }
       await firestore.collection('orders').doc(id).set(updates, { merge: true });

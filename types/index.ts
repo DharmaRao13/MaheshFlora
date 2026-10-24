@@ -145,6 +145,9 @@ export interface Order {
   paymentMethod: PaymentMethod;
   notes?: string;
   whatsappLink?: string;
+  paymentProvider?: string; // e.g. 'razorpay'
+  providerOrderId?: string; // Gateway order reference ID
+  providerPaymentId?: string; // Gateway transaction reference ID
   razorpayPaymentId?: string;
   razorpayOrderId?: string;
   paidAt?: string;

@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
 import { getOrderById, updateOrderPaymentStatus } from '@/lib/db/store';
 import { verifyAdminAuthorizationAsync } from '@/lib/auth';
+import { getPaymentProvider } from '@/lib/payments';
 
 /**
- * Verifies Razorpay checkout signatures on the server.
- * Payment simulation is available only to an authorized administrator.
- * Never configure fallback/mock secrets in production.
+ * Server-side payment verification endpoint.
+ * Delegates signature and gateway state validation to the configured PaymentProvider adapter.
+ * Payment simulation is available only to an authorized administrator in non-production environments.
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const {
       orderId,
       razorpayPaymentId,
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
     }
 
-    const order = await getOrderById(orderId);
+    const order = await getOrderById(orderId.trim());
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
@@ -34,6 +34,15 @@ export async function POST(req: NextRequest) {
         { error: 'Online payment verification is not available for a Cash on Delivery order.' },
         { status: 400 }
       );
+    }
+
+    // Idempotent guard: if order is already paid, do not re-mutate or allow downgrade
+    if (order.paymentStatus === 'paid') {
+      return NextResponse.json({
+        success: true,
+        message: 'Order is already marked as paid.',
+        order,
+      });
     }
 
     if (isSimulation) {
@@ -49,6 +58,8 @@ export async function POST(req: NextRequest) {
       if (simulationResult === 'success') {
         const fakePaymentId = `pay_sim_${Date.now()}`;
         const updated = await updateOrderPaymentStatus(orderId, 'paid', {
+          paymentProvider: 'simulation',
+          providerPaymentId: fakePaymentId,
           razorpayPaymentId: fakePaymentId,
         });
         return NextResponse.json({
@@ -89,30 +100,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Bind the gateway order to this internal order to prevent cross-order verification.
-    if (order.razorpayOrderId && order.razorpayOrderId !== razorpayOrderId) {
-      return NextResponse.json({ error: 'Payment order does not match this order.' }, { status: 400 });
-    }
+    // Delegate verification to provider adapter (validates cryptographic signature & gateway state)
+    const provider = getPaymentProvider(order.paymentProvider || 'razorpay');
+    const verification = await provider.verifyPayment({
+      order,
+      params: {
+        providerOrderId: razorpayOrderId,
+        providerPaymentId: razorpayPaymentId,
+        signature: razorpaySignature,
+      },
+    });
 
-    const generatedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest('hex');
-
-    const received = Buffer.from(razorpaySignature, 'utf8');
-    const expected = Buffer.from(generatedSignature, 'utf8');
-    if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
-      // Do not mutate the order on an invalid client request; otherwise a forged request
-      // could mark a legitimate order as failed.
+    if (!verification.success) {
+      // Do not mutate order on an invalid verification request
       return NextResponse.json(
-        { error: 'Invalid payment signature. Verification failed.' },
+        { error: verification.error || 'Invalid payment signature. Verification failed.' },
         { status: 400 }
       );
     }
 
     const updatedOrder = await updateOrderPaymentStatus(orderId, 'paid', {
-      razorpayPaymentId,
-      razorpayOrderId,
+      paymentProvider: verification.provider,
+      providerOrderId: verification.providerOrderId,
+      providerPaymentId: verification.providerPaymentId,
+      razorpayPaymentId: verification.providerPaymentId,
+      razorpayOrderId: verification.providerOrderId,
     });
 
     return NextResponse.json({

@@ -20,6 +20,7 @@ import {
   XCircle,
   ArrowLeft,
   RefreshCw,
+  Lock,
 } from 'lucide-react';
 import { Order, OrderStatus, PaymentStatus } from '@/types';
 import { formatINR, formatINRWithDecimals, DEFAULT_SETTINGS, buildUpiPaymentUri } from '@/lib/config';
@@ -241,6 +242,122 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
       setCancelError(err.message || 'Failed to cancel order.');
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  const [isPayingOnline, setIsPayingOnline] = useState(false);
+  const [onlinePayError, setOnlinePayError] = useState<string | null>(null);
+
+  const handlePayOnline = async () => {
+    setIsPayingOnline(true);
+    setOnlinePayError(null);
+
+    try {
+      const token =
+        order.accessToken ||
+        (typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('token') || ''
+          : '');
+      const phone =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('mahesh_customer_phone') || ''
+          : '';
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['x-order-token'] = token;
+      if (phone) headers['x-customer-phone'] = phone;
+
+      // 1. Request session from server
+      const res = await fetch('/api/payments/session', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ orderId: order.id }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initialize payment gateway.');
+      }
+
+      const { session } = data;
+
+      // 2. Ensure Razorpay checkout script is loaded
+      if (typeof window !== 'undefined' && !(window as any).Razorpay) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          script.async = true;
+          script.onload = () => resolve();
+          script.onerror = () =>
+            reject(
+              new Error(
+                'Failed to load secure payment gateway. Please check your connection or use WhatsApp UPI below.'
+              )
+            );
+          document.body.appendChild(script);
+        });
+      }
+
+      // 3. Open Standard Razorpay Checkout
+      const rzpOptions = {
+        key: session.keyId,
+        amount: session.amountPaise,
+        currency: session.currency,
+        name: 'Mahesh Flora',
+        description: `Order ${order.id}`,
+        order_id: session.providerOrderId,
+        prefill: {
+          name: order.customer.customerName || order.customer.recipientName || '',
+          contact: order.customer.phone || '',
+        },
+        theme: {
+          color: '#1e3a2b',
+        },
+        handler: async function (response: any) {
+          try {
+            const vRes = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                orderId: order.id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpaySignature: response.razorpay_signature,
+              }),
+            });
+            const vData = await vRes.json();
+            if (vData.order) {
+              setOrder(vData.order);
+            } else if (!vRes.ok) {
+              setOnlinePayError(vData.error || 'Payment signature verification failed.');
+            }
+          } catch (err: any) {
+            setOnlinePayError(err.message || 'Error communicating with payment verification server.');
+          } finally {
+            setIsPayingOnline(false);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setIsPayingOnline(false);
+            setOnlinePayError('Payment window was closed. You can retry payment whenever you are ready.');
+          },
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(rzpOptions);
+      rzp.on('payment.failed', function (resp: any) {
+        setIsPayingOnline(false);
+        setOnlinePayError(
+          resp.error?.description || 'Payment was not completed. Please retry or choose another payment method.'
+        );
+      });
+      rzp.open();
+    } catch (err: any) {
+      setOnlinePayError(err.message || 'Payment initialization failed.');
+      setIsPayingOnline(false);
     }
   };
 
@@ -649,7 +766,58 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
       {/* 2. ONLINE PAYMENT PANEL (Only for Online Payment Orders) */}
       {isOnlinePayment && order.paymentStatus !== 'paid' && (
         <div className="bg-emerald-50 border-2 border-emerald-300 rounded-3xl p-5 sm:p-7 shadow-soft space-y-6">
-          <div className="flex items-start gap-3">
+          {/* SECURE ONLINE CHECKOUT SECTION */}
+          <div className="bg-white p-5 rounded-2xl border border-emerald-200 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-sm sm:text-base text-botanical-900 flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-botanical-700" />
+                  <span>Instant Online Checkout</span>
+                </h3>
+                <p className="text-xs text-stone-600 mt-0.5">
+                  Pay securely with UPI (Google Pay, PhonePe, Paytm), Debit/Credit Cards, or NetBanking.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handlePayOnline}
+                disabled={isPayingOnline}
+                className="px-5 py-2.5 rounded-xl bg-botanical-700 hover:bg-botanical-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-soft transition active:scale-95 disabled:opacity-50 whitespace-nowrap"
+              >
+                {isPayingOnline ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Loading Checkout...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Pay {isTestMode && isAdmin ? '₹1.00 (Test Mode)' : formatINR(order.totalPaise)} Securely</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {onlinePayError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <span>{onlinePayError}</span>
+                  <div className="mt-1">
+                    <button
+                      type="button"
+                      onClick={handlePayOnline}
+                      className="underline font-bold hover:text-rose-900"
+                    >
+                      Retry Online Payment
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-start gap-3 pt-2 border-t border-emerald-200/60">
             <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
               <Phone className="w-5 h-5" />
             </div>
@@ -658,7 +826,7 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
                 Complete Payment via WhatsApp UPI ({DEFAULT_SETTINGS.upiId})
               </h2>
               <p className="text-xs text-emerald-800 mt-0.5 leading-relaxed">
-                Scan the UPI QR code below with any UPI App (Google Pay, PhonePe, Paytm), or tap the button to pay directly.
+                Alternatively, scan the UPI QR code below with any UPI App, or tap the button to pay directly.
               </p>
             </div>
           </div>
