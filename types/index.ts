@@ -252,3 +252,166 @@ export interface DailyPriceRecord {
   draftSavedAt?: string;
   updatedAt: string;
 }
+
+// ==================== EXPENSES ====================
+
+export type ExpenseCategory = 'flower_purchase' | 'transport' | 'packaging' | 'other';
+
+export interface Expense {
+  id: string; // e.g. EXP-1729758291
+  date: string; // YYYY-MM-DD (business date in IST)
+  category: ExpenseCategory;
+  amountPaise: number; // Stored in integer paise (e.g. 50000 = ₹500.00)
+  description: string;
+  referenceReceipt?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ==================== ANALYTICS & DASHBOARD ====================
+
+export type DatePreset =
+  | 'today'
+  | 'yesterday'
+  | 'last_7_days'
+  | 'last_30_days'
+  | 'this_month'
+  | 'last_month'
+  | 'this_year'
+  | 'custom';
+
+export interface DateRangeResult {
+  preset: DatePreset;
+  label: string;
+  fromDate: string; // YYYY-MM-DD
+  toDate: string; // YYYY-MM-DD
+  previousFromDate: string; // YYYY-MM-DD
+  previousToDate: string; // YYYY-MM-DD
+  previousLabel: string;
+  durationDays: number;
+}
+
+export interface FinancialMetric {
+  value: number; // paise, count, or percentage
+  formatted: string;
+  previousValue?: number;
+  previousFormatted?: string;
+  diff?: number;
+  diffFormatted?: string;
+  percentChange?: number;
+  percentChangeFormatted?: string;
+  trend?: 'up' | 'down' | 'neutral';
+  isPositiveGood?: boolean;
+  isEstimate?: boolean;
+  note?: string;
+}
+
+export interface AnalyticsKPIs {
+  grossSalesPaise: FinancialMetric;
+  netRevenuePaise: FinancialMetric;
+  totalOrdersCount: FinancialMetric;
+  completedOrdersCount: FinancialMetric;
+  pendingOrdersCount: FinancialMetric;
+  cancelledOrdersCount: FinancialMetric;
+  aovPaise: FinancialMetric;
+  flowerPurchaseExpensesPaise: FinancialMetric;
+  transportExpensesPaise: FinancialMetric;
+  otherExpensesPaise: FinancialMetric;
+  totalExpensesPaise: FinancialMetric;
+  netProfitPaise: FinancialMetric;
+  profitMarginPercent: FinancialMetric;
+}
+
+export interface FlowerPerformanceItem {
+  productId: string;
+  name: string;
+  teluguName?: string;
+  variety?: string;
+  category?: string;
+  quantitySold: number;
+  ordersCount: number;
+  salesRevenuePaise: number;
+  estimatedCostPaise: number;
+  profitContributionPaise: number;
+  marginPercent: number;
+}
+
+export interface DailyTrendPoint {
+  date: string; // YYYY-MM-DD
+  label: string; // e.g. "24 Oct"
+  grossSalesPaise: number;
+  netRevenuePaise: number;
+  expensesPaise: number;
+  netProfitPaise: number;
+  ordersCount: number;
+}
+
+export interface MonthlyBreakdownPoint {
+  monthKey: string; // YYYY-MM
+  label: string; // e.g. "Oct"
+  grossSalesPaise: number;
+  netRevenuePaise: number;
+  expensesPaise: number;
+  netProfitPaise: number;
+  ordersCount: number;
+}
+
+export interface PaymentMethodBreakdown {
+  method: PaymentMethod | string;
+  label: string;
+  count: number;
+  amountPaise: number;
+  percentage: number;
+}
+
+export interface OrderStatusBreakdown {
+  status: OrderStatus;
+  label: string;
+  count: number;
+  amountPaise: number;
+  percentage: number;
+}
+
+export interface SubscriptionsAnalytics {
+  activeCount: number;
+  pausedCount: number;
+  cancelledCount: number;
+  totalCount: number;
+  newInPeriodCount: number;
+  estimatedWeeklyRevenuePaise: number;
+  upcomingDeliveriesCount: number;
+}
+
+export interface FestivalBookingsAnalytics {
+  totalBookingsCount: number;
+  paidBookingsCount: number;
+  pendingPaymentCount: number;
+  cancelledCount: number;
+  totalRevenuePaise: number;
+  collectedRevenuePaise: number;
+  upcomingFestivalDeliveriesCount: number;
+}
+
+export interface AnalyticsSummaryResponse {
+  dateRange: DateRangeResult;
+  kpis: AnalyticsKPIs;
+  hasRecordedFlowerCosts: boolean;
+  dailyTrend: DailyTrendPoint[];
+  monthlyBreakdown: MonthlyBreakdownPoint[];
+  paymentDistribution: PaymentMethodBreakdown[];
+  orderStatusDistribution: OrderStatusBreakdown[];
+  flowerPerformance: FlowerPerformanceItem[];
+  subscriptions: SubscriptionsAnalytics;
+  festivals: FestivalBookingsAnalytics;
+  recentOrders: Array<{
+    id: string;
+    createdAt: string;
+    customerName: string;
+    orderStatus: OrderStatus;
+    paymentStatus: PaymentStatus;
+    paymentMethod: PaymentMethod;
+    totalPaise: number;
+  }>;
+}
+

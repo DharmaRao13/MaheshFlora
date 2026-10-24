@@ -14,6 +14,8 @@ import {
   DailyPriceRecord,
   SavedAddress,
   UserProfile,
+  Expense,
+  ExpenseCategory,
 } from '@/types';
 import { INITIAL_PRODUCTS, INITIAL_FESTIVALS } from './seed';
 import { DEFAULT_SETTINGS } from '../config';
@@ -87,6 +89,7 @@ interface DatabaseData {
   dailyPriceHistory?: DailyPriceRecord[];
   addresses?: SavedAddress[];
   profiles?: UserProfile[];
+  expenses?: Expense[];
 }
 
 // In-memory cache + persistent JSON file for safe, reproducible local development
@@ -107,6 +110,7 @@ function initializeDb(): DatabaseData {
     dailyPriceHistory: [],
     addresses: [],
     profiles: [],
+    expenses: [],
   };
   memoryDb = initial;
   saveDb(initial);
@@ -133,6 +137,7 @@ function getDb(): DatabaseData {
         dailyPriceHistory: parsed.dailyPriceHistory || [],
         addresses: parsed.addresses || [],
         profiles: parsed.profiles || [],
+        expenses: parsed.expenses || [],
       };
       return memoryDb;
     }
@@ -1387,6 +1392,162 @@ export async function deleteSavedAddress(id: string, uid: string): Promise<boole
   return true;
 }
 
+// ==================== EXPENSES ====================
+
+export async function getExpenses(options: {
+  fromDate?: string;
+  toDate?: string;
+  category?: string;
+} = {}): Promise<Expense[]> {
+  const db = getDb();
+  let list: Expense[] = [...(db.expenses || [])];
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      let query: any = firestore.collection('expenses').orderBy('date', 'desc');
+      if (options.fromDate) {
+        query = query.where('date', '>=', options.fromDate);
+      }
+      if (options.toDate) {
+        query = query.where('date', '<=', options.toDate);
+      }
+      const snap = await query.get();
+      if (!snap.empty) {
+        const firestoreList: Expense[] = [];
+        snap.forEach((doc: any) => {
+          firestoreList.push({ id: doc.id, ...doc.data() } as Expense);
+        });
+        list = firestoreList;
+        db.expenses = list;
+        saveDb(db);
+      }
+    } catch (err) {
+      console.warn('Firestore getExpenses error, falling back to local store:', err);
+    }
+  }
+
+  // Filter in memory for exact date bounds and category
+  if (options.fromDate) {
+    list = list.filter((e) => e.date >= options.fromDate!);
+  }
+  if (options.toDate) {
+    list = list.filter((e) => e.date <= options.toDate!);
+  }
+  if (options.category && options.category !== 'all') {
+    list = list.filter((e) => e.category === options.category);
+  }
+
+  return list.sort((a, b) => b.date.localeCompare(a.date) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function getExpenseById(id: string): Promise<Expense | null> {
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const doc = await firestore.collection('expenses').doc(id).get();
+      if (doc.exists) {
+        return { id: doc.id, ...doc.data() } as Expense;
+      }
+    } catch (err) {
+      console.warn('Firestore getExpenseById error:', err);
+    }
+  }
+  const db = getDb();
+  return (db.expenses || []).find((e) => e.id === id) || null;
+}
+
+export async function createExpense(
+  expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<Expense> {
+  const now = new Date().toISOString();
+  const id = `EXP-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const newExpense: Expense = {
+    ...expenseData,
+    id,
+    amountPaise: Math.round(expenseData.amountPaise),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const db = getDb();
+  if (!db.expenses) db.expenses = [];
+  db.expenses.unshift(newExpense);
+  saveDb(db);
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('expenses').doc(id).set(sanitizeForFirestore(newExpense));
+    } catch (err) {
+      console.warn('Firestore createExpense error:', err);
+    }
+  }
+
+  return newExpense;
+}
+
+export async function updateExpense(
+  id: string,
+  updates: Partial<Omit<Expense, 'id' | 'createdAt'>>
+): Promise<Expense> {
+  const db = getDb();
+  if (!db.expenses) db.expenses = [];
+  const idx = db.expenses.findIndex((e) => e.id === id);
+
+  const existing = idx !== -1 ? db.expenses[idx] : await getExpenseById(id);
+  if (!existing) {
+    throw new Error(`Expense with ID ${id} not found.`);
+  }
+
+  const updated: Expense = {
+    ...existing,
+    ...updates,
+    amountPaise: updates.amountPaise !== undefined ? Math.round(updates.amountPaise) : existing.amountPaise,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (idx !== -1) {
+    db.expenses[idx] = updated;
+  } else {
+    db.expenses.unshift(updated);
+  }
+  saveDb(db);
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('expenses').doc(id).set(sanitizeForFirestore(updated), { merge: true });
+    } catch (err) {
+      console.warn('Firestore updateExpense error:', err);
+    }
+  }
+
+  return updated;
+}
+
+export async function deleteExpense(id: string): Promise<boolean> {
+  const db = getDb();
+  if (!db.expenses) db.expenses = [];
+  const initialLen = db.expenses.length;
+  db.expenses = db.expenses.filter((e) => e.id !== id);
+  const foundInLocal = db.expenses.length < initialLen;
+  saveDb(db);
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('expenses').doc(id).delete();
+      return true;
+    } catch (err) {
+      console.warn('Firestore deleteExpense error:', err);
+    }
+  }
+
+  return foundInLocal;
+}
+
 // Helper to reset database for tests
 export function _resetDbForTesting() {
   testFirestoreInstance = undefined;
@@ -1402,6 +1563,7 @@ export function _resetDbForTesting() {
     dailyPriceHistory: [],
     addresses: [],
     profiles: [],
+    expenses: [],
   };
   if (fs.existsSync(DATA_FILE)) {
     try {

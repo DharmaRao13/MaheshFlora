@@ -23,8 +23,11 @@ import {
   Phone,
   Eye,
   RefreshCw,
-  Tag
+  Tag,
+  BarChart3,
+  Receipt
 } from 'lucide-react';
+import AnalyticsDashboard from '@/components/admin/AnalyticsDashboard';
 import {
   Order,
   Product,
@@ -55,7 +58,7 @@ interface DashboardMetrics {
 export default function AdminDashboardClient({
   initialTab = 'overview',
 }: {
-  initialTab?: 'overview' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings';
+  initialTab?: 'overview' | 'analytics' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings';
 }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authMode, setAuthMode] = useState<'passcode' | 'firebase'>('passcode');
@@ -66,7 +69,7 @@ export default function AdminDashboardClient({
   const [authLoading, setAuthLoading] = useState(false);
 
   // Active sub-navigation tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings'>(initialTab);
 
   // Live state
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
@@ -692,6 +695,7 @@ export default function AdminDashboardClient({
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-b border-botanical-100">
         {[
           { id: 'overview', label: 'Overview', icon: TrendingUp },
+          { id: 'analytics', label: 'Analysis Dashboard', icon: BarChart3 },
           { id: 'daily-prices', label: 'Daily Prices', icon: DollarSign },
           { id: 'orders', label: `Orders (${orders.length})`, icon: ShoppingBag },
           { id: 'products', label: `Inventory (${products.length})`, icon: Package },
@@ -717,6 +721,14 @@ export default function AdminDashboardClient({
           );
         })}
       </div>
+
+      {/* ANALYSIS DASHBOARD TAB */}
+      {activeTab === 'analytics' && (
+        <AnalyticsDashboard
+          adminKey={getAdminKey()}
+          onNavigateToTab={(tab) => setActiveTab(tab as any)}
+        />
+      )}
 
       {/* TAB 1: OVERVIEW METRICS */}
       {activeTab === 'overview' && metrics && (

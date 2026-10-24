@@ -107,6 +107,11 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // 11. Expenses: Admin read and write only
+    match /expenses/{expenseId} {
+      allow read, write: if isAdmin();
+    }
+
     // Fallback: deny everything else
     match /{document=**} {
       allow read, write: if false;
