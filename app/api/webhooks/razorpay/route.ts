@@ -2,65 +2,89 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getOrders, updateOrderPaymentStatus } from '@/lib/db/store';
 
+function signaturesMatch(expectedHex: string, receivedHex: string): boolean {
+  if (!/^[a-f0-9]+$/i.test(receivedHex) || receivedHex.length !== expectedHex.length) return false;
+  const expected = Buffer.from(expectedHex, 'hex');
+  const received = Buffer.from(receivedHex, 'hex');
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+}
+
 export async function POST(req: NextRequest) {
   try {
+    // Read the unmodified body: gateway webhook signatures are calculated over raw bytes/text.
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature');
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'rzp_webhook_mock_secret';
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    if (!signature) {
-      return NextResponse.json({ error: 'Missing webhook signature' }, { status: 400 });
+    if (!webhookSecret) {
+      console.error('RAZORPAY_WEBHOOK_SECRET is not configured.');
+      return NextResponse.json({ error: 'Webhook endpoint is not configured.' }, { status: 503 });
     }
 
-    // Verify webhook signature
+    if (!signature) {
+      return NextResponse.json({ error: 'Missing webhook signature.' }, { status: 400 });
+    }
+
     const expectedSignature = crypto
       .createHmac('sha256', webhookSecret)
       .update(rawBody)
       .digest('hex');
 
-    if (expectedSignature !== signature) {
-      console.warn('Invalid Razorpay webhook signature attempt.');
-      return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 400 });
+    if (!signaturesMatch(expectedSignature, signature)) {
+      console.warn('Rejected webhook with invalid signature.');
+      return NextResponse.json({ error: 'Invalid webhook signature.' }, { status: 400 });
     }
 
-    const event = JSON.parse(rawBody);
-    const eventType = event.event;
-    const payload = event.payload?.payment?.entity;
-
-    if (!payload) {
-      return NextResponse.json({ message: 'Unhandled event payload' });
+    let event: any;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid webhook JSON.' }, { status: 400 });
     }
 
-    // Extract notes or order reference
-    const orderId = payload.notes?.orderId || payload.order_id;
-    if (!orderId) {
-      return NextResponse.json({ message: 'No internal orderId attached to event' });
+    const eventType = event?.event;
+    const payload = event?.payload?.payment?.entity;
+
+    // Acknowledge unrelated but valid gateway events without changing order state.
+    if (!payload || !['payment.captured', 'order.paid', 'payment.failed'].includes(eventType)) {
+      return NextResponse.json({ success: true, ignoredEvent: eventType ?? 'unknown' });
     }
 
-    // Idempotent processing
+    const internalOrderId = payload.notes?.orderId;
+    const gatewayOrderId = payload.order_id;
+
+    if (!internalOrderId && !gatewayOrderId) {
+      // Return a failure so the gateway can retry after an order/reference issue is fixed.
+      return NextResponse.json({ error: 'Webhook has no order reference.' }, { status: 400 });
+    }
+
     const orders = await getOrders();
-    const targetOrder = orders.find((o) => o.id === orderId || o.razorpayOrderId === orderId);
+    const targetOrder = orders.find(
+      (order) =>
+        (internalOrderId && order.id === internalOrderId) ||
+        (gatewayOrderId && order.razorpayOrderId === gatewayOrderId)
+    );
 
     if (!targetOrder) {
-      return NextResponse.json({ message: `Order ${orderId} not found in database` });
+      console.warn('Verified webhook references an unknown internal order.');
+      return NextResponse.json({ error: 'Referenced order was not found.' }, { status: 404 });
     }
 
+    // Ignore duplicate delivery and never let a late failure event downgrade a paid order.
     if (eventType === 'payment.captured' || eventType === 'order.paid') {
       if (targetOrder.paymentStatus !== 'paid') {
         await updateOrderPaymentStatus(targetOrder.id, 'paid', {
           razorpayPaymentId: payload.id,
-          razorpayOrderId: payload.order_id,
+          razorpayOrderId: gatewayOrderId,
         });
       }
-    } else if (eventType === 'payment.failed') {
-      if (targetOrder.paymentStatus !== 'paid') {
-        await updateOrderPaymentStatus(targetOrder.id, 'failed');
-      }
+    } else if (eventType === 'payment.failed' && targetOrder.paymentStatus !== 'paid') {
+      await updateOrderPaymentStatus(targetOrder.id, 'failed');
     }
 
     return NextResponse.json({ success: true, processedEvent: eventType });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Webhook processing error:', error);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Webhook processing failed.' }, { status: 500 });
   }
 }

@@ -4,8 +4,9 @@ import { getOrderById, updateOrderPaymentStatus } from '@/lib/db/store';
 import { verifyAdminAuthorizationAsync } from '@/lib/auth';
 
 /**
- * Server-side payment verification endpoint.
- * Supports Razorpay signature verification or safe dev simulator.
+ * Verifies Razorpay checkout signatures on the server.
+ * Payment simulation is available only to an authorized administrator.
+ * Never configure fallback/mock secrets in production.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
       simulationResult,
     } = body;
 
-    if (!orderId) {
+    if (typeof orderId !== 'string' || !orderId.trim()) {
       return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
     }
 
@@ -28,23 +29,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    // Cash on Delivery orders should not have online payment verification
     if (order.paymentMethod?.toLowerCase() === 'cod') {
       return NextResponse.json(
-        { error: 'Cannot process online payment verification for a Cash on Delivery (COD) order.' },
+        { error: 'Online payment verification is not available for a Cash on Delivery order.' },
         { status: 400 }
       );
     }
 
-    // Handle Safe Development Simulator (Restricted to authorized admin/developers)
     if (isSimulation) {
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json({ error: 'Payment simulation is disabled in production.' }, { status: 403 });
+      }
+
       const auth = await verifyAdminAuthorizationAsync(req);
       if (!auth.authorized) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Administrative credentials required for payment simulation.' },
-          { status: 401 }
-        );
+        return NextResponse.json({ error: 'Administrative authorization required.' }, { status: 401 });
       }
+
       if (simulationResult === 'success') {
         const fakePaymentId = `pay_sim_${Date.now()}`;
         const updated = await updateOrderPaymentStatus(orderId, 'paid', {
@@ -52,26 +53,45 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json({
           success: true,
-          message: 'Payment simulation succeeded (DEV MODE)',
-          order: updated,
-        });
-      } else {
-        const updated = await updateOrderPaymentStatus(orderId, 'failed');
-        return NextResponse.json({
-          success: false,
-          message: 'Payment simulation marked as failed (DEV MODE)',
+          message: 'Payment simulation succeeded (development only).',
           order: updated,
         });
       }
+
+      const updated = await updateOrderPaymentStatus(orderId, 'failed');
+      return NextResponse.json({
+        success: false,
+        message: 'Payment simulation marked as failed (development only).',
+        order: updated,
+      });
     }
 
-    // Production / Test Razorpay Signature Verification
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'rzp_devmock_secret';
-    if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!secret) {
+      console.error('RAZORPAY_KEY_SECRET is not configured.');
       return NextResponse.json(
-        { error: 'Missing payment signature verification parameters' },
+        { error: 'Online payments are temporarily unavailable. Please try again later.' },
+        { status: 503 }
+      );
+    }
+
+    if (
+      typeof razorpayPaymentId !== 'string' ||
+      typeof razorpayOrderId !== 'string' ||
+      typeof razorpaySignature !== 'string' ||
+      !razorpayPaymentId ||
+      !razorpayOrderId ||
+      !razorpaySignature
+    ) {
+      return NextResponse.json(
+        { error: 'Missing payment signature verification parameters.' },
         { status: 400 }
       );
+    }
+
+    // Bind the gateway order to this internal order to prevent cross-order verification.
+    if (order.razorpayOrderId && order.razorpayOrderId !== razorpayOrderId) {
+      return NextResponse.json({ error: 'Payment order does not match this order.' }, { status: 400 });
     }
 
     const generatedSignature = crypto
@@ -79,8 +99,11 @@ export async function POST(req: NextRequest) {
       .update(`${razorpayOrderId}|${razorpayPaymentId}`)
       .digest('hex');
 
-    if (generatedSignature !== razorpaySignature) {
-      await updateOrderPaymentStatus(orderId, 'failed');
+    const received = Buffer.from(razorpaySignature, 'utf8');
+    const expected = Buffer.from(generatedSignature, 'utf8');
+    if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
+      // Do not mutate the order on an invalid client request; otherwise a forged request
+      // could mark a legitimate order as failed.
       return NextResponse.json(
         { error: 'Invalid payment signature. Verification failed.' },
         { status: 400 }
@@ -97,10 +120,10 @@ export async function POST(req: NextRequest) {
       message: 'Payment verified successfully.',
       order: updatedOrder,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Payment verification error:', error);
     return NextResponse.json(
-      { error: error?.message || 'Server error verifying payment' },
+      { error: 'Server error verifying payment.' },
       { status: 500 }
     );
   }
