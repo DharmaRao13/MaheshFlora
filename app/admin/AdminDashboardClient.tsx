@@ -25,9 +25,11 @@ import {
   RefreshCw,
   Tag,
   BarChart3,
-  Receipt
+  Receipt,
+  Store,
 } from 'lucide-react';
 import AnalyticsDashboard from '@/components/admin/AnalyticsDashboard';
+import StallManagement from '@/components/admin/StallManagement';
 import {
   Order,
   Product,
@@ -58,7 +60,7 @@ interface DashboardMetrics {
 export default function AdminDashboardClient({
   initialTab = 'overview',
 }: {
-  initialTab?: 'overview' | 'analytics' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings';
+  initialTab?: 'overview' | 'analytics' | 'stall' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings';
 }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authMode, setAuthMode] = useState<'passcode' | 'firebase'>('passcode');
@@ -69,7 +71,7 @@ export default function AdminDashboardClient({
   const [authLoading, setAuthLoading] = useState(false);
 
   // Active sub-navigation tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'stall' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings'>(initialTab);
 
   // Live state
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
@@ -696,6 +698,7 @@ export default function AdminDashboardClient({
         {[
           { id: 'overview', label: 'Overview', icon: TrendingUp },
           { id: 'analytics', label: 'Analysis Dashboard', icon: BarChart3 },
+          { id: 'stall', label: 'Stall Management', icon: Store },
           { id: 'daily-prices', label: 'Daily Prices', icon: DollarSign },
           { id: 'orders', label: `Orders (${orders.length})`, icon: ShoppingBag },
           { id: 'products', label: `Inventory (${products.length})`, icon: Package },
@@ -725,6 +728,14 @@ export default function AdminDashboardClient({
       {/* ANALYSIS DASHBOARD TAB */}
       {activeTab === 'analytics' && (
         <AnalyticsDashboard
+          adminKey={getAdminKey()}
+          onNavigateToTab={(tab) => setActiveTab(tab as any)}
+        />
+      )}
+
+      {/* STALL MANAGEMENT TAB */}
+      {activeTab === 'stall' && (
+        <StallManagement
           adminKey={getAdminKey()}
           onNavigateToTab={(tab) => setActiveTab(tab as any)}
         />

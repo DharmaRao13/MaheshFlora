@@ -16,6 +16,8 @@ import {
   UserProfile,
   Expense,
   ExpenseCategory,
+  StallDailyEntry,
+  StallAuditEntry,
 } from '@/types';
 import { INITIAL_PRODUCTS, INITIAL_FESTIVALS } from './seed';
 import { DEFAULT_SETTINGS } from '../config';
@@ -90,6 +92,7 @@ interface DatabaseData {
   addresses?: SavedAddress[];
   profiles?: UserProfile[];
   expenses?: Expense[];
+  stallDailyEntries?: StallDailyEntry[];
 }
 
 // In-memory cache + persistent JSON file for safe, reproducible local development
@@ -111,6 +114,7 @@ function initializeDb(): DatabaseData {
     addresses: [],
     profiles: [],
     expenses: [],
+    stallDailyEntries: [],
   };
   memoryDb = initial;
   saveDb(initial);
@@ -138,6 +142,7 @@ function getDb(): DatabaseData {
         addresses: parsed.addresses || [],
         profiles: parsed.profiles || [],
         expenses: parsed.expenses || [],
+        stallDailyEntries: parsed.stallDailyEntries || [],
       };
       return memoryDb;
     }
@@ -439,6 +444,9 @@ export async function getOrdersByIds(ids: string[]): Promise<Order[]> {
 
 export async function createOrder(order: Order): Promise<Order> {
   const db = getDb();
+  if (!order.id) {
+    order.id = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  }
   // Prevent duplicate insertion
   const existing = db.orders.find((o) => o.id === order.id);
   if (existing) {
@@ -1548,6 +1556,303 @@ export async function deleteExpense(id: string): Promise<boolean> {
   return foundInLocal;
 }
 
+// ==================== STALL DAILY ENTRIES ====================
+
+export interface SaveStallEntryInput {
+  stallId?: string;
+  stallName?: string;
+  date: string; // YYYY-MM-DD
+  flowerSales: {
+    jasminePaise: number;
+    marigoldPaise: number;
+    mixedFlowersPaise: number;
+    otherFlowersPaise: number;
+  };
+  collections: {
+    cashPaise: number;
+    upiPaise: number;
+    otherPaise: number;
+  };
+  expenses: {
+    flowerPurchasePaise: number;
+    transportPaise: number;
+    packagingPaise: number;
+    otherPaise: number;
+  };
+  reconciliationAcknowledged?: boolean;
+  reconciliationReason?: string;
+  notes?: string;
+  status?: 'draft' | 'finalized';
+  expectedVersion?: number;
+}
+
+export async function getStallEntries(options: {
+  fromDate?: string;
+  toDate?: string;
+  stallId?: string;
+  status?: 'draft' | 'finalized';
+} = {}): Promise<StallDailyEntry[]> {
+  const db = getDb();
+  let list: StallDailyEntry[] = [...(db.stallDailyEntries || [])];
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      let query: any = firestore.collection('stallDailyEntries').orderBy('date', 'desc');
+      if (options.fromDate) {
+        query = query.where('date', '>=', options.fromDate);
+      }
+      if (options.toDate) {
+        query = query.where('date', '<=', options.toDate);
+      }
+      const snap = await query.get();
+      if (!snap.empty) {
+        const firestoreList: StallDailyEntry[] = [];
+        snap.forEach((doc: any) => {
+          firestoreList.push({ id: doc.id, ...doc.data() } as StallDailyEntry);
+        });
+        list = firestoreList;
+        db.stallDailyEntries = list;
+        saveDb(db);
+      }
+    } catch (err) {
+      console.warn('Firestore getStallEntries error, falling back to local store:', err);
+    }
+  }
+
+  if (options.stallId) {
+    list = list.filter((e) => e.stallId === options.stallId);
+  }
+  if (options.fromDate) {
+    list = list.filter((e) => e.date >= options.fromDate!);
+  }
+  if (options.toDate) {
+    list = list.filter((e) => e.date <= options.toDate!);
+  }
+  if (options.status) {
+    list = list.filter((e) => e.status === options.status);
+  }
+
+  return list.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export async function getStallEntryById(id: string): Promise<StallDailyEntry | null> {
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      const doc = await firestore.collection('stallDailyEntries').doc(id).get();
+      if (doc.exists) {
+        return { id: doc.id, ...doc.data() } as StallDailyEntry;
+      }
+    } catch (err) {
+      console.warn('Firestore getStallEntryById error:', err);
+    }
+  }
+  const db = getDb();
+  return (db.stallDailyEntries || []).find((e) => e.id === id) || null;
+}
+
+export async function getStallEntryByDate(date: string, stallId = 'main'): Promise<StallDailyEntry | null> {
+  const expectedId = `STALL-${stallId}-${date}`;
+  return getStallEntryById(expectedId);
+}
+
+export async function saveStallEntry(
+  input: SaveStallEntryInput,
+  adminUser = 'Administrator',
+  correctionReason?: string
+): Promise<StallDailyEntry> {
+  const stallId = input.stallId || 'main';
+  const date = input.date;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error('Valid business date (YYYY-MM-DD) is required.');
+  }
+
+  // Validate non-negative numeric inputs
+  const validateField = (val: any, name: string): number => {
+    const num = Number(val);
+    if (!Number.isFinite(num) || isNaN(num) || num < 0) {
+      throw new Error(`Invalid monetary amount for "${name}". Must be a non-negative number.`);
+    }
+    return Math.round(num);
+  };
+
+  const flowerSales = {
+    jasminePaise: validateField(input.flowerSales?.jasminePaise ?? 0, 'Jasmine Sales'),
+    marigoldPaise: validateField(input.flowerSales?.marigoldPaise ?? 0, 'Marigold Sales'),
+    mixedFlowersPaise: validateField(input.flowerSales?.mixedFlowersPaise ?? 0, 'Mixed Flowers Sales'),
+    otherFlowersPaise: validateField(input.flowerSales?.otherFlowersPaise ?? 0, 'Other Flowers Sales'),
+  };
+
+  const collections = {
+    cashPaise: validateField(input.collections?.cashPaise ?? 0, 'Cash Collections'),
+    upiPaise: validateField(input.collections?.upiPaise ?? 0, 'UPI Collections'),
+    otherPaise: validateField(input.collections?.otherPaise ?? 0, 'Other Collections'),
+  };
+
+  const expenses = {
+    flowerPurchasePaise: validateField(input.expenses?.flowerPurchasePaise ?? 0, 'Flower Purchase Cost'),
+    transportPaise: validateField(input.expenses?.transportPaise ?? 0, 'Transport Expenses'),
+    packagingPaise: validateField(input.expenses?.packagingPaise ?? 0, 'Packaging Expenses'),
+    otherPaise: validateField(input.expenses?.otherPaise ?? 0, 'Other Expenses'),
+  };
+
+  // Recalculate totals on the trusted server
+  const totalSalesPaise = flowerSales.jasminePaise + flowerSales.marigoldPaise + flowerSales.mixedFlowersPaise + flowerSales.otherFlowersPaise;
+  const totalCollectionsPaise = collections.cashPaise + collections.upiPaise + collections.otherPaise;
+  const totalExpensesPaise = expenses.flowerPurchasePaise + expenses.transportPaise + expenses.packagingPaise + expenses.otherPaise;
+  const preliminaryOperatingResultPaise = totalSalesPaise - totalExpensesPaise;
+  const reconciliationDifferencePaise = totalCollectionsPaise - totalSalesPaise;
+
+  const reconciliationAcknowledged = Boolean(input.reconciliationAcknowledged);
+  const reconciliationReason = input.reconciliationReason?.trim();
+
+  // If collections and sales do not reconcile and not acknowledged, fail
+  if (reconciliationDifferencePaise !== 0 && !reconciliationAcknowledged) {
+    const diffRupees = Math.abs(reconciliationDifferencePaise) / 100;
+    const direction = reconciliationDifferencePaise > 0 ? 'higher' : 'lower';
+    throw new Error(
+      `Collections (₹${(totalCollectionsPaise / 100).toFixed(2)}) are ₹${diffRupees.toFixed(2)} ${direction} than flower sales (₹${(totalSalesPaise / 100).toFixed(2)}). Please verify collections or acknowledge with a reason.`
+    );
+  }
+
+  const id = `STALL-${stallId}-${date}`;
+  const now = new Date().toISOString();
+  const db = getDb();
+  if (!db.stallDailyEntries) db.stallDailyEntries = [];
+
+  const existingIdx = db.stallDailyEntries.findIndex((e) => e.id === id);
+  const existing = existingIdx !== -1 ? db.stallDailyEntries[existingIdx] : await getStallEntryById(id);
+
+  // Concurrency check
+  if (existing && input.expectedVersion !== undefined && existing.version !== input.expectedVersion) {
+    throw new Error(`Concurrency error: This stall entry was modified by another administrator (version ${existing.version}). Please reload to review current values.`);
+  }
+
+  let finalRecord: StallDailyEntry;
+
+  if (existing) {
+    // Check changed fields
+    const changedFields: string[] = [];
+    if (existing.totalSalesPaise !== totalSalesPaise) changedFields.push('totalSalesPaise');
+    if (existing.totalCollectionsPaise !== totalCollectionsPaise) changedFields.push('totalCollectionsPaise');
+    if (existing.totalExpensesPaise !== totalExpensesPaise) changedFields.push('totalExpensesPaise');
+    if (existing.status !== (input.status || existing.status)) changedFields.push('status');
+
+    const auditEntry: StallAuditEntry = {
+      timestamp: now,
+      adminName: adminUser,
+      action: (input.status === 'finalized' && existing.status !== 'finalized') ? 'finalized' : 'updated',
+      reason: correctionReason || input.reconciliationReason || 'Updated stall daily entry values',
+      previousValues: {
+        totalSalesPaise: existing.totalSalesPaise,
+        totalCollectionsPaise: existing.totalCollectionsPaise,
+        totalExpensesPaise: existing.totalExpensesPaise,
+        flowerSales: { ...existing.flowerSales },
+        collections: { ...existing.collections },
+        expenses: { ...existing.expenses },
+        status: existing.status,
+      },
+      changedFields: changedFields.length > 0 ? changedFields : ['values'],
+    };
+
+    finalRecord = {
+      ...existing,
+      stallName: input.stallName || existing.stallName || 'Main Flower Stall',
+      flowerSales,
+      totalSalesPaise,
+      collections,
+      totalCollectionsPaise,
+      expenses,
+      totalExpensesPaise,
+      preliminaryOperatingResultPaise,
+      reconciliationDifferencePaise,
+      reconciliationAcknowledged,
+      reconciliationReason,
+      notes: input.notes !== undefined ? input.notes : existing.notes,
+      status: input.status || existing.status,
+      version: (existing.version || 1) + 1,
+      auditHistory: [auditEntry, ...(existing.auditHistory || [])],
+      updatedAt: now,
+      updatedBy: adminUser,
+    };
+
+    if (existingIdx !== -1) {
+      db.stallDailyEntries[existingIdx] = finalRecord;
+    } else {
+      db.stallDailyEntries.unshift(finalRecord);
+    }
+  } else {
+    // New Record
+    const auditEntry: StallAuditEntry = {
+      timestamp: now,
+      adminName: adminUser,
+      action: 'created',
+      reason: correctionReason || 'Initial daily stall record creation',
+    };
+
+    finalRecord = {
+      id,
+      stallId,
+      stallName: input.stallName || 'Main Flower Stall',
+      date,
+      flowerSales,
+      totalSalesPaise,
+      collections,
+      totalCollectionsPaise,
+      expenses,
+      totalExpensesPaise,
+      preliminaryOperatingResultPaise,
+      reconciliationDifferencePaise,
+      reconciliationAcknowledged,
+      reconciliationReason,
+      notes: input.notes || '',
+      status: input.status || 'draft',
+      version: 1,
+      auditHistory: [auditEntry],
+      createdAt: now,
+      createdBy: adminUser,
+      updatedAt: now,
+      updatedBy: adminUser,
+    };
+
+    db.stallDailyEntries.unshift(finalRecord);
+  }
+
+  saveDb(db);
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('stallDailyEntries').doc(id).set(sanitizeForFirestore(finalRecord));
+    } catch (err) {
+      console.warn('Firestore saveStallEntry error:', err);
+    }
+  }
+
+  return finalRecord;
+}
+
+export async function deleteStallEntry(id: string): Promise<boolean> {
+  const db = getDb();
+  if (!db.stallDailyEntries) db.stallDailyEntries = [];
+  const initialLen = db.stallDailyEntries.length;
+  db.stallDailyEntries = db.stallDailyEntries.filter((e) => e.id !== id);
+  const found = db.stallDailyEntries.length < initialLen;
+  saveDb(db);
+
+  const firestore = getFirestoreInstance();
+  if (firestore) {
+    try {
+      await firestore.collection('stallDailyEntries').doc(id).delete();
+      return true;
+    } catch (err) {
+      console.warn('Firestore deleteStallEntry error:', err);
+    }
+  }
+  return found;
+}
+
 // Helper to reset database for tests
 export function _resetDbForTesting() {
   testFirestoreInstance = undefined;
@@ -1564,6 +1869,7 @@ export function _resetDbForTesting() {
     addresses: [],
     profiles: [],
     expenses: [],
+    stallDailyEntries: [],
   };
   if (fs.existsSync(DATA_FILE)) {
     try {

@@ -32,6 +32,7 @@ import {
   Banknote,
   Search,
   ExternalLink,
+  Store,
 } from 'lucide-react';
 import {
   DatePreset,
@@ -40,12 +41,14 @@ import {
   ExpenseCategory,
   FinancialMetric,
   FlowerPerformanceItem,
+  AnalyticsView,
 } from '@/types';
 import { formatCurrencyPaise } from '@/lib/analytics';
 import { formatHumanDate } from '@/lib/dateUtils';
 
 interface AnalyticsDashboardProps {
   adminKey: string;
+  initialView?: AnalyticsView;
   onNavigateToTab?: (tab: string) => void;
 }
 
@@ -67,7 +70,10 @@ const EXPENSE_CATEGORIES: { id: ExpenseCategory; label: string; color: string }[
   { id: 'other', label: 'Other Operating Cost', color: 'bg-stone-100 text-stone-900 border-stone-300' },
 ];
 
-export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: AnalyticsDashboardProps) {
+export default function AnalyticsDashboard({ adminKey, initialView = 'combined', onNavigateToTab }: AnalyticsDashboardProps) {
+  // Three Views: Combined (default), Stall, Online
+  const [activeView, setActiveView] = useState<AnalyticsView>(initialView);
+
   // Filter state
   const [preset, setPreset] = useState<DatePreset>('last_7_days');
   const [customFrom, setCustomFrom] = useState('');
@@ -103,7 +109,7 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
     setLoading(true);
     setError(null);
     try {
-      let url = `/api/admin/analytics?preset=${preset}`;
+      let url = `/api/admin/analytics?preset=${preset}&view=${activeView}`;
       if (preset === 'custom' && customFrom && customTo) {
         url += `&from=${customFrom}&to=${customTo}`;
       }
@@ -152,7 +158,7 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
   useEffect(() => {
     fetchAnalytics();
     fetchExpenses();
-  }, [preset, adminKey]);
+  }, [preset, activeView, adminKey]);
 
   const handleApplyCustomRange = (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,11 +229,10 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
   };
 
   const handleExportCSV = () => {
-    let url = `/api/admin/analytics/export?preset=${preset}`;
+    let url = `/api/admin/analytics/export?preset=${preset}&view=${activeView}`;
     if (preset === 'custom' && customFrom && customTo) {
       url += `&from=${customFrom}&to=${customTo}`;
     }
-    // We can fetch with header and create a blob link
     fetch(url, {
       headers: { 'x-admin-key': adminKey },
     })
@@ -239,7 +244,7 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
         const downloadUrl = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = downloadUrl;
-        a.download = `mahesh-flora-financial-report-${summary?.dateRange.fromDate || 'report'}-to-${summary?.dateRange.toDate || 'today'}.csv`;
+        a.download = `mahesh-flora-${activeView}-financial-report-${summary?.dateRange.fromDate || 'report'}-to-${summary?.dateRange.toDate || 'today'}.csv`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -371,8 +376,37 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
           </div>
         </div>
 
+        {/* View Switcher: Combined Analysis (Default), Stall Analysis, Online Analysis */}
+        <div className="pt-2 border-t border-botanical-200/60 flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {[
+            { id: 'combined', label: 'Combined Analysis', icon: Layers, desc: 'Stall + Online' },
+            { id: 'stall', label: 'Stall Analysis', icon: Store, desc: 'Counter Only' },
+            { id: 'online', label: 'Online Analysis', icon: ShoppingBag, desc: 'Website Only' },
+          ].map((v) => {
+            const Icon = v.icon;
+            const isActive = activeView === v.id;
+            return (
+              <button
+                key={v.id}
+                onClick={() => setActiveView(v.id as AnalyticsView)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition ${
+                  isActive
+                    ? 'bg-botanical-800 text-cream-50 shadow-soft'
+                    : 'bg-cream-50 text-stone-600 hover:bg-cream-200/70 border border-botanical-200/60'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{v.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${isActive ? 'bg-cream-50/20 text-cream-100' : 'bg-cream-200 text-stone-500'}`}>
+                  {v.desc}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Date Presets Row */}
-        <div className="pt-3 border-t border-botanical-200/60 flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+        <div className="pt-2 border-t border-botanical-200/40 flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
           {PRESET_OPTIONS.map((item) => {
             const isSelected = preset === item.id;
             return (
@@ -535,118 +569,381 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
 
       {/* 2. 12 RESPONSIVE KPI CARDS */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-        
-        {/* KPI 1: Gross Sales */}
-        <KPICard
-          title="Gross Sales"
-          metric={kpis.grossSalesPaise}
-          icon={DollarSign}
-          iconColor="text-botanical-700 bg-botanical-100"
-          tooltip="Total value of valid orders before refunds or cancellations"
-        />
-
-        {/* KPI 2: Net Collected Revenue */}
-        <KPICard
-          title="Net Collected Revenue"
-          metric={kpis.netRevenuePaise}
-          icon={CreditCard}
-          iconColor="text-emerald-700 bg-emerald-100"
-          tooltip="Successfully verified collected payments (COD delivered, UPI, Razorpay) minus refunds"
-        />
-
-        {/* KPI 3: Total Orders */}
-        <KPICard
-          title="Total Orders"
-          metric={kpis.totalOrdersCount}
-          icon={ShoppingBag}
-          iconColor="text-blue-700 bg-blue-100"
-          tooltip="Total count of customer orders placed within this reporting period"
-        />
-
-        {/* KPI 4: Completed Orders */}
-        <KPICard
-          title="Completed Orders"
-          metric={kpis.completedOrdersCount}
-          icon={CheckCircle2}
-          iconColor="text-emerald-700 bg-emerald-100"
-          tooltip="Orders successfully fulfilled and marked as delivered to doorstep"
-        />
-
-        {/* KPI 5: Pending Orders */}
-        <KPICard
-          title="Pending / In Transit"
-          metric={kpis.pendingOrdersCount}
-          icon={Truck}
-          iconColor="text-amber-700 bg-amber-100"
-          tooltip="Orders currently in packing, confirmed, or out for dawn delivery"
-        />
-
-        {/* KPI 6: Cancelled Orders */}
-        <KPICard
-          title="Cancelled Orders"
-          metric={kpis.cancelledOrdersCount}
-          icon={XCircle}
-          iconColor="text-rose-700 bg-rose-100"
-          tooltip="Orders cancelled before fulfillment; excluded from net sales"
-        />
-
-        {/* KPI 7: Average Order Value (AOV) */}
-        <KPICard
-          title="Average Order Value"
-          metric={kpis.aovPaise}
-          icon={Layers}
-          iconColor="text-purple-700 bg-purple-100"
-          tooltip="Gross Sales divided by valid non-cancelled orders"
-        />
-
-        {/* KPI 8: Flower Purchase Costs */}
-        <KPICard
-          title="Flower Purchase Costs"
-          metric={kpis.flowerPurchaseExpensesPaise}
-          icon={Receipt}
-          iconColor="text-amber-700 bg-amber-100"
-          tooltip="Recorded wholesale mandi flower purchase expenses"
-        />
-
-        {/* KPI 9: Delivery & Transport */}
-        <KPICard
-          title="Delivery & Transport"
-          metric={kpis.transportExpensesPaise}
-          icon={Truck}
-          iconColor="text-sky-700 bg-sky-100"
-          tooltip="Recorded driver, vehicle, and fuel expenses for morning deliveries"
-        />
-
-        {/* KPI 10: Other Operating Expenses */}
-        <KPICard
-          title="Packaging & Other Costs"
-          metric={kpis.otherExpensesPaise}
-          icon={Package}
-          iconColor="text-stone-700 bg-stone-200"
-          tooltip="Recorded banana leaf, eco-packaging boxes, and operating overheads"
-        />
-
-        {/* KPI 11: Net Profit / Loss */}
-        <KPICard
-          title="Net Profit / Loss"
-          metric={kpis.netProfitPaise}
-          icon={TrendingUp}
-          iconColor={kpis.netProfitPaise.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
-          tooltip="Net Collected Revenue minus all recorded operating expenses"
-          isProfit
-        />
-
-        {/* KPI 12: Profit Margin */}
-        <KPICard
-          title="Profit Margin"
-          metric={kpis.profitMarginPercent}
-          icon={Percent}
-          iconColor={kpis.profitMarginPercent.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
-          tooltip="Net Profit as a percentage of Net Collected Revenue"
-          isProfit
-        />
-
+        {activeView === 'stall' ? (
+          <>
+            <KPICard
+              title="Total Stall Sales"
+              metric={kpis.grossSalesPaise}
+              icon={Store}
+              iconColor="text-botanical-700 bg-botanical-100"
+              tooltip="Total recorded daily counter flower sales"
+            />
+            <KPICard
+              title="Total Collections"
+              metric={kpis.netRevenuePaise}
+              icon={CreditCard}
+              iconColor="text-emerald-700 bg-emerald-100"
+              tooltip="Cash + UPI + Other collections breakdown"
+            />
+            <KPICard
+              title="Cash Collected"
+              metric={summary.stallKPIs?.stallCashCollectionsPaise || kpis.netRevenuePaise}
+              icon={Banknote}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Cash received at stall counter"
+            />
+            <KPICard
+              title="UPI Collected"
+              metric={summary.stallKPIs?.stallUpiCollectionsPaise || kpis.netRevenuePaise}
+              icon={QrCode}
+              iconColor="text-blue-700 bg-blue-100"
+              tooltip="Digital QR and UPI collections at counter"
+            />
+            <KPICard
+              title="Flower Purchases"
+              metric={kpis.flowerPurchaseExpensesPaise}
+              icon={Receipt}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Wholesale mandi procurement for stall"
+            />
+            <KPICard
+              title="Delivery & Transport"
+              metric={kpis.transportExpensesPaise}
+              icon={Truck}
+              iconColor="text-sky-700 bg-sky-100"
+              tooltip="Stall transit and vehicle expenses"
+            />
+            <KPICard
+              title="Packaging & Overhead"
+              metric={kpis.otherExpensesPaise}
+              icon={Package}
+              iconColor="text-stone-700 bg-stone-200"
+              tooltip="Packaging covers, bags, and counter overheads"
+            />
+            <KPICard
+              title="Total Recorded Expenses"
+              metric={kpis.totalExpensesPaise}
+              icon={Receipt}
+              iconColor="text-rose-700 bg-rose-100"
+              tooltip="Sum of all recorded stall operating costs"
+            />
+            <KPICard
+              title="Preliminary Operating Result"
+              metric={kpis.netProfitPaise}
+              icon={TrendingUp}
+              iconColor={kpis.netProfitPaise.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
+              tooltip="Total Stall Sales minus Total Recorded Expenses"
+              isProfit
+            />
+            <KPICard
+              title="Preliminary Margin"
+              metric={kpis.profitMarginPercent}
+              icon={Percent}
+              iconColor={kpis.profitMarginPercent.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
+              tooltip="Preliminary Operating Result as a % of Total Stall Sales"
+              isProfit
+            />
+            <KPICard
+              title="Recorded Days Count"
+              metric={kpis.totalOrdersCount}
+              icon={Calendar}
+              iconColor="text-purple-700 bg-purple-100"
+              tooltip="Number of business days recorded in period"
+            />
+            <KPICard
+              title="Discrepancies"
+              metric={summary.stallKPIs?.reconciliationDiscrepanciesCount || { value: 0, formatted: '0' }}
+              icon={AlertCircle}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Days where collections differed from recorded sales"
+            />
+          </>
+        ) : activeView === 'combined' ? (
+          <>
+            <KPICard
+              title="Total Business Sales"
+              metric={kpis.grossSalesPaise}
+              icon={DollarSign}
+              iconColor="text-botanical-700 bg-botanical-100"
+              tooltip="Stall Sales + Online Gross Sales"
+            />
+            <KPICard
+              title="Net Collected Revenue"
+              metric={kpis.netRevenuePaise}
+              icon={CreditCard}
+              iconColor="text-emerald-700 bg-emerald-100"
+              tooltip="Stall Collections + Online Verified Paid Revenue"
+            />
+            <KPICard
+              title="Stall Sales"
+              metric={summary.combinedKPIs?.stallSalesPaise || kpis.grossSalesPaise}
+              icon={Store}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Counter sales from physical flower stall"
+            />
+            <KPICard
+              title="Online Sales"
+              metric={summary.combinedKPIs?.onlineSalesPaise || kpis.grossSalesPaise}
+              icon={ShoppingBag}
+              iconColor="text-blue-700 bg-blue-100"
+              tooltip="Website orders and subscription sales"
+            />
+            <KPICard
+              title="Total Business Expenses"
+              metric={kpis.totalExpensesPaise}
+              icon={Receipt}
+              iconColor="text-rose-700 bg-rose-100"
+              tooltip="Combined recorded stall and online operating expenses"
+            />
+            <KPICard
+              title="Combined Operating Result"
+              metric={kpis.netProfitPaise}
+              icon={TrendingUp}
+              iconColor={kpis.netProfitPaise.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
+              tooltip="Stall preliminary operating result + Online net recognized profit"
+              isProfit
+            />
+            <KPICard
+              title="Total Cash Collected"
+              metric={summary.combinedKPIs?.totalCashCollectionsPaise || kpis.netRevenuePaise}
+              icon={Banknote}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Stall Cash + Online COD Paid"
+            />
+            <KPICard
+              title="Total UPI / Digital"
+              metric={summary.combinedKPIs?.totalUpiCollectionsPaise || kpis.netRevenuePaise}
+              icon={QrCode}
+              iconColor="text-sky-700 bg-sky-100"
+              tooltip="Stall UPI + Razorpay/WhatsApp digital collections"
+            />
+            <KPICard
+              title="Online Orders Placed"
+              metric={summary.combinedKPIs?.totalOnlineOrdersCount || kpis.totalOrdersCount}
+              icon={ShoppingBag}
+              iconColor="text-purple-700 bg-purple-100"
+              tooltip="Total online customer orders placed in this period"
+            />
+            <KPICard
+              title="Average Order Value"
+              metric={kpis.aovPaise}
+              icon={Layers}
+              iconColor="text-indigo-700 bg-indigo-100"
+              tooltip="Average transaction value across channels"
+            />
+            <KPICard
+              title="Flower Purchases"
+              metric={kpis.flowerPurchaseExpensesPaise}
+              icon={Receipt}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Wholesale flower procurement expenses across channels"
+            />
+            <KPICard
+              title="Combined Margin"
+              metric={kpis.profitMarginPercent}
+              icon={Percent}
+              iconColor={kpis.profitMarginPercent.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
+              tooltip="Combined Operating Result as a percentage of Total Sales"
+              isProfit
+            />
+          </>
+        ) : (
+          <>
+            <KPICard
+              title="Gross Sales"
+              metric={kpis.grossSalesPaise}
+              icon={DollarSign}
+              iconColor="text-botanical-700 bg-botanical-100"
+              tooltip="Total value of valid orders before refunds or cancellations"
+            />
+            <KPICard
+              title="Net Collected Revenue"
+              metric={kpis.netRevenuePaise}
+              icon={CreditCard}
+              iconColor="text-emerald-700 bg-emerald-100"
+              tooltip="Successfully verified collected payments (COD delivered, UPI, Razorpay) minus refunds"
+            />
+            <KPICard
+              title="Total Orders"
+              metric={kpis.totalOrdersCount}
+              icon={ShoppingBag}
+              iconColor="text-blue-700 bg-blue-100"
+              tooltip="Total count of customer orders placed within this reporting period"
+            />
+            <KPICard
+              title="Completed Orders"
+              metric={kpis.completedOrdersCount}
+              icon={CheckCircle2}
+              iconColor="text-emerald-700 bg-emerald-100"
+              tooltip="Orders successfully fulfilled and marked as delivered to doorstep"
+            />
+            <KPICard
+              title="Pending / In Transit"
+              metric={kpis.pendingOrdersCount}
+              icon={Truck}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Orders currently in packing, confirmed, or out for dawn delivery"
+            />
+            <KPICard
+              title="Cancelled Orders"
+              metric={kpis.cancelledOrdersCount}
+              icon={XCircle}
+              iconColor="text-rose-700 bg-rose-100"
+              tooltip="Orders cancelled before fulfillment; excluded from net sales"
+            />
+            <KPICard
+              title="Average Order Value"
+              metric={kpis.aovPaise}
+              icon={Layers}
+              iconColor="text-purple-700 bg-purple-100"
+              tooltip="Gross Sales divided by valid non-cancelled orders"
+            />
+            <KPICard
+              title="Flower Purchase Costs"
+              metric={kpis.flowerPurchaseExpensesPaise}
+              icon={Receipt}
+              iconColor="text-amber-700 bg-amber-100"
+              tooltip="Recorded wholesale mandi flower purchase expenses"
+            />
+            <KPICard
+              title="Delivery & Transport"
+              metric={kpis.transportExpensesPaise}
+              icon={Truck}
+              iconColor="text-sky-700 bg-sky-100"
+              tooltip="Recorded driver, vehicle, and fuel expenses for morning deliveries"
+            />
+            <KPICard
+              title="Packaging & Other Costs"
+              metric={kpis.otherExpensesPaise}
+              icon={Package}
+              iconColor="text-stone-700 bg-stone-200"
+              tooltip="Recorded banana leaf, eco-packaging boxes, and operating overheads"
+            />
+            <KPICard
+              title="Net Profit / Loss"
+              metric={kpis.netProfitPaise}
+              icon={TrendingUp}
+              iconColor={kpis.netProfitPaise.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
+              tooltip="Net Collected Revenue minus all recorded operating expenses"
+              isProfit
+            />
+            <KPICard
+              title="Profit Margin"
+              metric={kpis.profitMarginPercent}
+              icon={Percent}
+              iconColor={kpis.profitMarginPercent.value >= 0 ? 'text-emerald-700 bg-emerald-100' : 'text-rose-700 bg-rose-100'}
+              tooltip="Net Profit as a percentage of Net Collected Revenue"
+              isProfit
+            />
+          </>
+        )}
       </div>
+
+      {/* CHANNEL CONTRIBUTION & CATEGORY BREAKDOWN (COMBINED VIEW) */}
+      {activeView === 'combined' && summary.channelContribution && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Channel Contribution Card */}
+          <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-5 shadow-soft space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-botanical-700" />
+                <span>Sales Channel Contribution</span>
+              </h3>
+              <span className="text-xs font-semibold text-stone-500">Stall vs Online</span>
+            </div>
+
+            <div className="space-y-3">
+              {/* Contribution Progress Bar */}
+              <div className="w-full h-4 rounded-full bg-cream-200 overflow-hidden flex shadow-inner">
+                <div
+                  style={{ width: `${summary.channelContribution.stallPercentage}%` }}
+                  className="bg-amber-600 h-full transition-all duration-500"
+                  title={`Stall: ${summary.channelContribution.stallPercentage}%`}
+                ></div>
+                <div
+                  style={{ width: `${summary.channelContribution.onlinePercentage}%` }}
+                  className="bg-botanical-700 h-full transition-all duration-500"
+                  title={`Online: ${summary.channelContribution.onlinePercentage}%`}
+                ></div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 pt-1">
+                <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+                    <span>Physical Flower Stall</span>
+                  </div>
+                  <div className="font-serif font-bold text-lg text-amber-950 mt-1">
+                    {formatCurrencyPaise(summary.channelContribution.stallSalesPaise)}
+                  </div>
+                  <div className="text-[11px] font-semibold text-amber-700 mt-0.5">
+                    {summary.channelContribution.stallPercentage}% of total sales
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-botanical-50/80 border border-botanical-200">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-botanical-900">
+                    <span className="w-2.5 h-2.5 rounded-full bg-botanical-700"></span>
+                    <span>Website & Subscriptions</span>
+                  </div>
+                  <div className="font-serif font-bold text-lg text-botanical-950 mt-1">
+                    {formatCurrencyPaise(summary.channelContribution.onlineSalesPaise)}
+                  </div>
+                  <div className="text-[11px] font-semibold text-botanical-700 mt-0.5">
+                    {summary.channelContribution.onlinePercentage}% of total sales
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Unified Flower Category Breakdown */}
+          {summary.categoryBreakdown && (
+            <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-5 shadow-soft space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+                <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-botanical-700" />
+                  <span>Flower Category Sales (Consolidated)</span>
+                </h3>
+                <span className="text-xs font-semibold text-stone-500">Across Both Channels</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-botanical-200/60 text-stone-500 text-[11px] font-semibold">
+                      <th className="py-2 px-2">Category</th>
+                      <th className="py-2 px-2 text-right">Stall</th>
+                      <th className="py-2 px-2 text-right">Online</th>
+                      <th className="py-2 px-2 text-right">Total</th>
+                      <th className="py-2 px-2 text-right">Share</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-botanical-100">
+                    {summary.categoryBreakdown.map((cat) => (
+                      <tr key={cat.category} className="hover:bg-cream-50/60">
+                        <td className="py-2 px-2 font-semibold text-botanical-900">{cat.label}</td>
+                        <td className="py-2 px-2 text-right font-mono text-stone-600">
+                          {formatCurrencyPaise(cat.stallSalesPaise, false)}
+                        </td>
+                        <td className="py-2 px-2 text-right font-mono text-stone-600">
+                          {formatCurrencyPaise(cat.onlineSalesPaise, false)}
+                        </td>
+                        <td className="py-2 px-2 text-right font-mono font-bold text-botanical-900">
+                          {formatCurrencyPaise(cat.totalSalesPaise, false)}
+                        </td>
+                        <td className="py-2 px-2 text-right font-mono font-semibold text-botanical-700">
+                          {cat.percentage}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 3. INTERACTIVE CHARTS SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -941,132 +1238,298 @@ export default function AnalyticsDashboard({ adminKey, onNavigateToTab }: Analyt
         </div>
       </div>
 
-      {/* 6. ORDERS, SUBSCRIPTIONS & FESTIVALS SECTION */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-        {/* Subscriptions Card */}
-        <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
+      {/* 6. ORDERS, STALL ENTRIES, SUBSCRIPTIONS & FESTIVALS SECTION */}
+      {activeView === 'stall' ? (
+        <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-5 shadow-soft space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
-            <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-botanical-700" />
-              <span>Weekly Subscriptions</span>
-            </h3>
+            <div>
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <Store className="w-4 h-4 text-botanical-700" />
+                <span>Daily Stall Entries in Selected Period</span>
+              </h3>
+              <p className="text-xs text-stone-500">
+                Counter sales, collections breakdown, wholesale expenses, and reconciliation audit
+              </p>
+            </div>
             {onNavigateToTab && (
               <button
-                onClick={() => onNavigateToTab('subscriptions')}
-                className="text-[11px] font-semibold text-botanical-700 hover:underline flex items-center gap-0.5"
+                onClick={() => onNavigateToTab('stall')}
+                className="px-3 py-1.5 rounded-xl bg-botanical-700 text-cream-50 hover:bg-botanical-800 font-semibold text-xs flex items-center gap-1.5 transition shadow-soft"
               >
-                <span>View</span>
+                <span>Open Stall Management</span>
                 <ExternalLink className="w-3 h-3" />
               </button>
             )}
           </div>
 
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Active Recurring Subscribers</span>
-              <strong className="text-emerald-800">{subscriptions.activeCount}</strong>
+          {!summary.stallEntries || summary.stallEntries.length === 0 ? (
+            <div className="py-8 text-center text-xs text-stone-500">
+              No stall records found for {dateRange.label}. Click &quot;Open Stall Management&quot; to log daily counter entries.
             </div>
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">New Joined in Period</span>
-              <strong className="text-botanical-900">{subscriptions.newInPeriodCount}</strong>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-botanical-200/60 text-stone-500 text-[11px] font-semibold">
+                    <th className="py-2.5 px-3">Date (IST)</th>
+                    <th className="py-2.5 px-3 text-right">Sales</th>
+                    <th className="py-2.5 px-3 text-right">Cash</th>
+                    <th className="py-2.5 px-3 text-right">UPI</th>
+                    <th className="py-2.5 px-3 text-right">Total Collections</th>
+                    <th className="py-2.5 px-3 text-right">Expenses</th>
+                    <th className="py-2.5 px-3 text-right">Operating Result</th>
+                    <th className="py-2.5 px-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-botanical-100">
+                  {summary.stallEntries.map((s) => (
+                    <tr key={s.id} className="hover:bg-cream-50/60">
+                      <td className="py-2.5 px-3 font-semibold text-botanical-900">{s.date}</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-botanical-900">
+                        {formatCurrencyPaise(s.totalSalesPaise)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-stone-600">
+                        {formatCurrencyPaise(s.collections?.cashPaise || 0)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-stone-600">
+                        {formatCurrencyPaise(s.collections?.upiPaise || 0)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-semibold text-botanical-900">
+                        {formatCurrencyPaise(s.totalCollectionsPaise)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-rose-700">
+                        {formatCurrencyPaise(s.totalExpensesPaise)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold">
+                        <span className={s.preliminaryOperatingResultPaise >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                          {formatCurrencyPaise(s.preliminaryOperatingResultPaise)}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          s.status === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {s.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Paused / Temporary Hold</span>
-              <strong className="text-amber-800">{subscriptions.pausedCount}</strong>
-            </div>
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Cancelled</span>
-              <strong className="text-rose-800">{subscriptions.cancelledCount}</strong>
-            </div>
-            <div className="flex justify-between py-1.5 pt-2">
-              <span className="font-semibold text-botanical-900">Estimated Weekly Revenue</span>
-              <strong className="text-emerald-800 font-mono text-sm">{formatCurrencyPaise(subscriptions.estimatedWeeklyRevenuePaise)}</strong>
-            </div>
-          </div>
+          )}
         </div>
+      ) : activeView === 'combined' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Daily Stall Entries Summary */}
+          <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <Store className="w-4 h-4 text-botanical-700" />
+                <span>Stall Daily Records ({summary.stallEntries?.length || 0})</span>
+              </h3>
+              {onNavigateToTab && (
+                <button
+                  onClick={() => onNavigateToTab('stall')}
+                  className="text-[11px] font-semibold text-botanical-700 hover:underline flex items-center gap-0.5"
+                >
+                  <span>Stall Manager</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </div>
 
-        {/* Festival Bookings Card */}
-        <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
-            <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-purple-700" />
-              <span>Festival Pre-Bookings</span>
-            </h3>
-            {onNavigateToTab && (
-              <button
-                onClick={() => onNavigateToTab('festivals')}
-                className="text-[11px] font-semibold text-purple-700 hover:underline flex items-center gap-0.5"
-              >
-                <span>View</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Advance Bookings Placed</span>
-              <strong className="text-botanical-900">{festivals.totalBookingsCount}</strong>
-            </div>
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Pre-Paid Bookings</span>
-              <strong className="text-emerald-800">{festivals.paidBookingsCount}</strong>
-            </div>
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Payment Pending</span>
-              <strong className="text-amber-800">{festivals.pendingPaymentCount}</strong>
-            </div>
-            <div className="flex justify-between py-1 border-b border-botanical-100">
-              <span className="text-stone-600">Total Festival Booked Value</span>
-              <strong className="text-botanical-900 font-mono">{formatCurrencyPaise(festivals.totalRevenuePaise)}</strong>
-            </div>
-            <div className="flex justify-between py-1.5 pt-2">
-              <span className="font-semibold text-botanical-900">Collected Advance Cash</span>
-              <strong className="text-emerald-800 font-mono text-sm">{formatCurrencyPaise(festivals.collectedRevenuePaise)}</strong>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Orders in Period */}
-        <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
-            <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
-              <ShoppingBag className="w-4 h-4 text-botanical-700" />
-              <span>Recent Orders ({summary.recentOrders.length})</span>
-            </h3>
-            {onNavigateToTab && (
-              <button
-                onClick={() => onNavigateToTab('orders')}
-                className="text-[11px] font-semibold text-botanical-700 hover:underline flex items-center gap-0.5"
-              >
-                <span>All Orders</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {summary.recentOrders.map((ord) => (
-              <div key={ord.id} className="p-2 rounded-xl bg-white/80 border border-botanical-100 text-xs flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-botanical-900">{ord.id}</div>
-                  <div className="text-[10px] text-stone-500">{ord.customerName} &bull; {ord.paymentMethod.toUpperCase()}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold text-botanical-900 font-mono">{formatCurrencyPaise(ord.totalPaise)}</div>
-                  <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
-                    ord.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                  }`}>
-                    {ord.paymentStatus}
-                  </span>
-                </div>
+            {!summary.stallEntries || summary.stallEntries.length === 0 ? (
+              <div className="py-6 text-center text-xs text-stone-500">
+                No stall records logged for {dateRange.label}.
               </div>
-            ))}
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {summary.stallEntries.map((s) => (
+                  <div key={s.id} className="p-2.5 rounded-xl bg-white/80 border border-botanical-100 text-xs flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-botanical-900">{s.date}</div>
+                      <div className="text-[10px] text-stone-500">
+                        Cash: {formatCurrencyPaise(s.collections?.cashPaise || 0, false)} | UPI: {formatCurrencyPaise(s.collections?.upiPaise || 0, false)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-botanical-900 font-mono">{formatCurrencyPaise(s.totalSalesPaise)}</div>
+                      <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
+                        s.status === 'finalized' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {s.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Online Orders */}
+          <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <ShoppingBag className="w-4 h-4 text-botanical-700" />
+                <span>Recent Online Orders ({summary.recentOrders.length})</span>
+              </h3>
+              {onNavigateToTab && (
+                <button
+                  onClick={() => onNavigateToTab('orders')}
+                  className="text-[11px] font-semibold text-botanical-700 hover:underline flex items-center gap-0.5"
+                >
+                  <span>All Orders</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {summary.recentOrders.map((ord) => (
+                <div key={ord.id} className="p-2.5 rounded-xl bg-white/80 border border-botanical-100 text-xs flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-botanical-900">{ord.id}</div>
+                    <div className="text-[10px] text-stone-500">{ord.customerName} &bull; {ord.paymentMethod.toUpperCase()}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-botanical-900 font-mono">{formatCurrencyPaise(ord.totalPaise)}</div>
+                    <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
+                      ord.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {ord.paymentStatus}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Subscriptions Card */}
+          <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-botanical-700" />
+                <span>Weekly Subscriptions</span>
+              </h3>
+              {onNavigateToTab && (
+                <button
+                  onClick={() => onNavigateToTab('subscriptions')}
+                  className="text-[11px] font-semibold text-botanical-700 hover:underline flex items-center gap-0.5"
+                >
+                  <span>View</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </div>
 
-      </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Active Recurring Subscribers</span>
+                <strong className="text-emerald-800">{subscriptions.activeCount}</strong>
+              </div>
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">New Joined in Period</span>
+                <strong className="text-botanical-900">{subscriptions.newInPeriodCount}</strong>
+              </div>
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Paused / Temporary Hold</span>
+                <strong className="text-amber-800">{subscriptions.pausedCount}</strong>
+              </div>
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Cancelled</span>
+                <strong className="text-rose-800">{subscriptions.cancelledCount}</strong>
+              </div>
+              <div className="flex justify-between py-1.5 pt-2">
+                <span className="font-semibold text-botanical-900">Estimated Weekly Revenue</span>
+                <strong className="text-emerald-800 font-mono text-sm">{formatCurrencyPaise(subscriptions.estimatedWeeklyRevenuePaise)}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Festival Bookings Card */}
+          <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-700" />
+                <span>Festival Pre-Bookings</span>
+              </h3>
+              {onNavigateToTab && (
+                <button
+                  onClick={() => onNavigateToTab('festivals')}
+                  className="text-[11px] font-semibold text-purple-700 hover:underline flex items-center gap-0.5"
+                >
+                  <span>View</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Advance Bookings Placed</span>
+                <strong className="text-botanical-900">{festivals.totalBookingsCount}</strong>
+              </div>
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Pre-Paid Bookings</span>
+                <strong className="text-emerald-800">{festivals.paidBookingsCount}</strong>
+              </div>
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Payment Pending</span>
+                <strong className="text-amber-800">{festivals.pendingPaymentCount}</strong>
+              </div>
+              <div className="flex justify-between py-1 border-b border-botanical-100">
+                <span className="text-stone-600">Total Festival Booked Value</span>
+                <strong className="text-botanical-900 font-mono">{formatCurrencyPaise(festivals.totalRevenuePaise)}</strong>
+              </div>
+              <div className="flex justify-between py-1.5 pt-2">
+                <span className="font-semibold text-botanical-900">Collected Advance Cash</span>
+                <strong className="text-emerald-800 font-mono text-sm">{formatCurrencyPaise(festivals.collectedRevenuePaise)}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Recent Orders in Period */}
+          <div className="bg-cream-100/90 border border-botanical-200 rounded-2xl p-4 sm:p-5 shadow-soft space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-botanical-200/60">
+              <h3 className="font-serif font-bold text-base text-botanical-900 flex items-center gap-2">
+                <ShoppingBag className="w-4 h-4 text-botanical-700" />
+                <span>Recent Orders ({summary.recentOrders.length})</span>
+              </h3>
+              {onNavigateToTab && (
+                <button
+                  onClick={() => onNavigateToTab('orders')}
+                  className="text-[11px] font-semibold text-botanical-700 hover:underline flex items-center gap-0.5"
+                >
+                  <span>All Orders</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {summary.recentOrders.map((ord) => (
+                <div key={ord.id} className="p-2 rounded-xl bg-white/80 border border-botanical-100 text-xs flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-botanical-900">{ord.id}</div>
+                    <div className="text-[10px] text-stone-500">{ord.customerName} &bull; {ord.paymentMethod.toUpperCase()}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-botanical-900 font-mono">{formatCurrencyPaise(ord.totalPaise)}</div>
+                    <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
+                      ord.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {ord.paymentStatus}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: LOG NEW OPERATING EXPENSE */}
       {showExpenseModal && (

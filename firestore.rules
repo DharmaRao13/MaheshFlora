@@ -112,6 +112,11 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // 12. Stall Daily Entries: Admin read and write only
+    match /stallDailyEntries/{entryId} {
+      allow read, write: if isAdmin();
+    }
+
     // Fallback: deny everything else
     match /{document=**} {
       allow read, write: if false;

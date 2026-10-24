@@ -264,12 +264,72 @@ export interface Expense {
   amountPaise: number; // Stored in integer paise (e.g. 50000 = ₹500.00)
   description: string;
   referenceReceipt?: string;
+  channel?: 'stall' | 'online' | 'shared'; // Defaults to 'online' or 'shared'
+  stallEntryId?: string; // If synced from a stall entry
   createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
 
+// ==================== STALL DAILY ENTRIES ====================
+
+export interface StallFlowerSales {
+  jasminePaise: number;
+  marigoldPaise: number;
+  mixedFlowersPaise: number;
+  otherFlowersPaise: number;
+}
+
+export interface StallCollections {
+  cashPaise: number;
+  upiPaise: number;
+  otherPaise: number;
+}
+
+export interface StallExpenses {
+  flowerPurchasePaise: number;
+  transportPaise: number;
+  packagingPaise: number;
+  otherPaise: number;
+}
+
+export interface StallAuditEntry {
+  timestamp: string;
+  adminName: string;
+  action: 'created' | 'updated' | 'finalized';
+  reason?: string;
+  previousValues?: Partial<StallDailyEntry>;
+  changedFields?: string[];
+}
+
+export interface StallDailyEntry {
+  id: string; // STALL-<stallId>-<date> e.g. STALL-main-2026-10-24
+  stallId: string; // e.g. 'main'
+  stallName?: string; // e.g. 'Main Flower Stall'
+  date: string; // YYYY-MM-DD (Asia/Kolkata)
+  flowerSales: StallFlowerSales;
+  totalSalesPaise: number;
+  collections: StallCollections;
+  totalCollectionsPaise: number;
+  expenses: StallExpenses;
+  totalExpensesPaise: number;
+  preliminaryOperatingResultPaise: number; // totalSalesPaise - totalExpensesPaise
+  reconciliationDifferencePaise: number; // totalCollectionsPaise - totalSalesPaise
+  reconciliationAcknowledged: boolean;
+  reconciliationReason?: string;
+  notes?: string;
+  status: 'draft' | 'finalized';
+  version: number;
+  auditHistory: StallAuditEntry[];
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 // ==================== ANALYTICS & DASHBOARD ====================
+
+export type AnalyticsView = 'combined' | 'stall' | 'online';
 
 export type DatePreset =
   | 'today'
@@ -393,9 +453,61 @@ export interface FestivalBookingsAnalytics {
   upcomingFestivalDeliveriesCount: number;
 }
 
+export interface StallKPIs {
+  totalStallSalesPaise: FinancialMetric;
+  stallCashCollectionsPaise: FinancialMetric;
+  stallUpiCollectionsPaise: FinancialMetric;
+  stallOtherCollectionsPaise: FinancialMetric;
+  totalCollectionsPaise: FinancialMetric;
+  flowerPurchaseExpensesPaise: FinancialMetric;
+  transportExpensesPaise: FinancialMetric;
+  packagingExpensesPaise: FinancialMetric;
+  otherExpensesPaise: FinancialMetric;
+  totalRecordedExpensesPaise: FinancialMetric;
+  preliminaryOperatingResultPaise: FinancialMetric;
+  reconciliationDiscrepanciesCount: FinancialMetric;
+  reconciliationNetDiffPaise: FinancialMetric;
+}
+
+export interface CombinedKPIs {
+  totalBusinessSalesPaise: FinancialMetric; // Stall sales + Online sales
+  netCollectedRevenuePaise: FinancialMetric; // Stall collections + Online paid revenue
+  stallSalesPaise: FinancialMetric;
+  onlineSalesPaise: FinancialMetric;
+  totalBusinessExpensesPaise: FinancialMetric;
+  combinedOperatingResultPaise: FinancialMetric;
+  totalCashCollectionsPaise: FinancialMetric;
+  totalUpiCollectionsPaise: FinancialMetric;
+  totalOnlineOrdersCount: FinancialMetric;
+  stallSalesContributionPercent: FinancialMetric;
+  onlineSalesContributionPercent: FinancialMetric;
+}
+
+export interface ChannelContribution {
+  stallSalesPaise: number;
+  onlineSalesPaise: number;
+  totalSalesPaise: number;
+  stallPercentage: number;
+  onlinePercentage: number;
+}
+
+export interface UnifiedCategoryBreakdownItem {
+  category: 'jasmine' | 'marigold' | 'mixed' | 'other';
+  label: string;
+  stallSalesPaise: number;
+  onlineSalesPaise: number;
+  totalSalesPaise: number;
+  percentage: number;
+}
+
 export interface AnalyticsSummaryResponse {
+  view: AnalyticsView;
   dateRange: DateRangeResult;
   kpis: AnalyticsKPIs;
+  stallKPIs?: StallKPIs;
+  combinedKPIs?: CombinedKPIs;
+  channelContribution?: ChannelContribution;
+  categoryBreakdown?: UnifiedCategoryBreakdownItem[];
   hasRecordedFlowerCosts: boolean;
   dailyTrend: DailyTrendPoint[];
   monthlyBreakdown: MonthlyBreakdownPoint[];
@@ -404,6 +516,7 @@ export interface AnalyticsSummaryResponse {
   flowerPerformance: FlowerPerformanceItem[];
   subscriptions: SubscriptionsAnalytics;
   festivals: FestivalBookingsAnalytics;
+  stallEntries?: StallDailyEntry[];
   recentOrders: Array<{
     id: string;
     createdAt: string;

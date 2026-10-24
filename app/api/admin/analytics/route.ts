@@ -9,8 +9,9 @@ import {
   getFestivalBookings,
   getExpenses,
   getProducts,
+  getStallEntries,
 } from '@/lib/db/store';
-import { DatePreset } from '@/types';
+import { DatePreset, AnalyticsView } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,18 +27,20 @@ export async function GET(req: NextRequest) {
     const preset = (searchParams.get('preset') || 'last_7_days') as DatePreset;
     const from = searchParams.get('from') || undefined;
     const to = searchParams.get('to') || undefined;
+    const view = (searchParams.get('view') || 'combined') as AnalyticsView;
 
     // 2. Compute date range in Asia/Kolkata
     const dateRange = calculateDateRange(preset, from, to);
 
     // 3. Fetch source records
-    const [orders, subscriptions, festivals, festivalBookings, expenses, products] = await Promise.all([
+    const [orders, subscriptions, festivals, festivalBookings, expenses, products, stallEntries] = await Promise.all([
       getOrders(),
       getSubscriptions(),
       getFestivals(),
       getFestivalBookings(),
       getExpenses(),
       getProducts(),
+      getStallEntries(),
     ]);
 
     // 4. Compute analytics metrics, KPIs, comparisons, and breakdowns
@@ -47,8 +50,10 @@ export async function GET(req: NextRequest) {
       festivals,
       festivalBookings,
       expenses,
+      stallEntries,
       products,
       dateRange,
+      view,
     });
 
     return NextResponse.json({ success: true, summary });

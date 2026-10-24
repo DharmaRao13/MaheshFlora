@@ -152,7 +152,7 @@ describe('Admin Analytics Dashboard Component and Navigation Tests', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AnalyticsDashboard adminKey={ADMIN_SECRET_KEY} />);
+    render(<AnalyticsDashboard adminKey={ADMIN_SECRET_KEY} initialView="online" />);
 
     await waitFor(() => {
       expect(screen.getByText('Sales, Profit & Operational Analysis')).toBeInTheDocument();
@@ -212,7 +212,7 @@ describe('Admin Analytics Dashboard Component and Navigation Tests', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AnalyticsDashboard adminKey={ADMIN_SECRET_KEY} />);
+    render(<AnalyticsDashboard adminKey={ADMIN_SECRET_KEY} initialView="online" />);
 
     await waitFor(() => {
       expect(screen.getByText('Today')).toBeInTheDocument();
@@ -258,7 +258,7 @@ describe('Admin Analytics Dashboard Component and Navigation Tests', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AnalyticsDashboard adminKey={ADMIN_SECRET_KEY} />);
+    render(<AnalyticsDashboard adminKey={ADMIN_SECRET_KEY} initialView="online" />);
 
     await waitFor(() => {
       expect(screen.getByText('Log Expense')).toBeInTheDocument();
