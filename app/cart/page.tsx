@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { formatINR } from '@/lib/config';
+import PromotionalBanner from '@/components/PromotionalBanner';
 
 export default function CartPage() {
   const {
@@ -30,6 +31,37 @@ export default function CartPage() {
     freeDeliveryThresholdPaise,
     isHydrated,
   } = useCart();
+
+  const [activePromo, setActivePromo] = React.useState<{
+    id: string;
+    title: string;
+    type: string;
+    minOrderAmountPaise: number;
+    bannerWording?: string;
+  } | null>(null);
+  const [effectiveThreshold, setEffectiveThreshold] = React.useState<number>(freeDeliveryThresholdPaise);
+
+  React.useEffect(() => {
+    try {
+      const p = fetch('/api/promotions/active');
+      if (p && typeof p.then === 'function') {
+        p.then((res) => (res && typeof res.json === 'function' && res.ok ? res.json() : null))
+          .then((data) => {
+            if (data && data.active && data.promotion) {
+              setActivePromo(data.promotion);
+              if (typeof data.promotion.minOrderAmountPaise === 'number' && data.promotion.minOrderAmountPaise > 0) {
+                setEffectiveThreshold(data.promotion.minOrderAmountPaise);
+              } else if (typeof data.freeDeliveryThresholdPaise === 'number') {
+                setEffectiveThreshold(data.freeDeliveryThresholdPaise);
+              }
+            } else if (data && typeof data.freeDeliveryThresholdPaise === 'number') {
+              setEffectiveThreshold(data.freeDeliveryThresholdPaise);
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {}
+  }, [freeDeliveryThresholdPaise]);
 
   if (!isHydrated) {
     return (
@@ -68,15 +100,16 @@ export default function CartPage() {
   }
 
   // Calculate free delivery progress percentage
-  const freeDeliveryPercent = Math.min(
-    100,
-    Math.round((subtotalPaise / freeDeliveryThresholdPaise) * 100)
-  );
+  const remainingNeededPaise = Math.max(0, effectiveThreshold - subtotalPaise);
+  const freeDeliveryPercent = effectiveThreshold > 0
+    ? Math.min(100, Math.round((subtotalPaise / effectiveThreshold) * 100))
+    : 100;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6">
+      <PromotionalBanner />
       
-      <div className="flex items-center justify-between mb-6 pb-3 border-b border-botanical-100">
+      <div className="flex items-center justify-between pb-3 border-b border-botanical-100">
         <div>
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-botanical-900">
             Your Flower Basket
@@ -99,13 +132,13 @@ export default function CartPage() {
         <div className="flex items-center justify-between text-xs font-semibold text-botanical-900">
           <div className="flex items-center gap-1.5">
             <Truck className="w-4 h-4 text-botanical-700" />
-            {amountNeededForFreeDeliveryPaise === 0 ? (
+            {remainingNeededPaise === 0 ? (
               <span className="text-emerald-700 font-bold">
-                🎉 Congratulations! You have unlocked FREE Doorstep Delivery!
+                🎉 Congratulations! You&apos;ve unlocked free delivery.
               </span>
             ) : (
               <span>
-                Add <strong>{formatINR(amountNeededForFreeDeliveryPaise)}</strong> more for <strong>FREE Doorstep Delivery</strong>
+                Add <strong>{formatINR(remainingNeededPaise)}</strong> more to unlock free delivery!
               </span>
             )}
           </div>
@@ -117,6 +150,20 @@ export default function CartPage() {
             style={{ width: `${freeDeliveryPercent}%` }}
           />
         </div>
+        {activePromo && (
+          <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 font-medium pt-1">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span>
+              {activePromo.type === 'first_time_customers'
+                ? `Special Offer: First-time customers get free delivery on purchases of ${formatINR(effectiveThreshold)} or more.`
+                : activePromo.type === 'first_n_orders'
+                ? `Early Bird Offer: Free delivery on today's early orders of ${formatINR(effectiveThreshold)} or more.`
+                : activePromo.type === 'first_time_and_first_n_orders'
+                ? `Early Bird Offer: First-time customers get free delivery on early orders of ${formatINR(effectiveThreshold)} or more.`
+                : `Special Offer: Free delivery on all purchases of ${formatINR(effectiveThreshold)} or more.`}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -221,24 +268,31 @@ export default function CartPage() {
                 <span>Standard Doorstep Delivery</span>
               </span>
               <span>
-                {deliveryFeePaise === 0 ? (
-                  <span className="text-emerald-700 font-bold">FREE</span>
+                {subtotalPaise >= effectiveThreshold ? (
+                  <span className="text-emerald-700 font-bold inline-flex items-center gap-1">
+                    <span>FREE</span>
+                    {activePromo && (
+                      <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
+                        Offer
+                      </span>
+                    )}
+                  </span>
                 ) : (
                   formatINR(deliveryFeePaise)
                 )}
               </span>
             </div>
 
-            {deliveryFeePaise > 0 && (
+            {subtotalPaise < effectiveThreshold && (
               <p className="text-[11px] text-stone-500 italic">
-                Free delivery automatically applied on orders ₹299 and above.
+                Free delivery automatically applied on orders {formatINR(effectiveThreshold)} and above.
               </p>
             )}
 
             <div className="pt-3 border-t border-botanical-200 flex justify-between items-baseline">
               <span className="text-base font-bold text-botanical-900">Total Amount</span>
               <span className="text-xl font-serif font-bold text-botanical-900">
-                {formatINR(totalPaise)}
+                {formatINR(subtotalPaise + (subtotalPaise >= effectiveThreshold ? 0 : deliveryFeePaise))}
               </span>
             </div>
           </div>

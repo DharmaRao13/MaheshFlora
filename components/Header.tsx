@@ -23,12 +23,15 @@ import { useCart } from '@/context/CartContext';
 import { useCustomerAuth } from '@/context/CustomerAuthContext';
 import { DEFAULT_SETTINGS } from '@/lib/config';
 import { maskPhoneNumber } from '@/lib/business';
+import CustomerAuthModal from './CustomerAuthModal';
 
 export default function Header() {
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [savedCustomerName, setSavedCustomerName] = useState<string | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
 
   const { cartCount, isHydrated } = useCart();
   const { user, customerPhone, isAuthenticated, signOut } = useCustomerAuth();
@@ -239,8 +242,8 @@ export default function Header() {
                       </div>
                     </div>
                   ) : (
-                    <div className="p-3 bg-gradient-to-br from-botanical-100/60 to-cream-100 rounded-xl mb-1.5 border border-botanical-200/60">
-                      <div className="flex items-center justify-between text-xs text-botanical-900 font-medium mb-1.5">
+                    <div className="p-3 bg-gradient-to-br from-botanical-100/60 to-cream-100 rounded-xl mb-1.5 border border-botanical-200/60 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-botanical-900 font-medium">
                         <span>Welcome to Mahesh Flora</span>
                       </div>
                       <Link
@@ -251,6 +254,17 @@ export default function Header() {
                         <LogIn className="w-3.5 h-3.5" />
                         <span>Login / Sign Up</span>
                       </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAccountDropdownOpen(false);
+                          setAuthModalMode('register');
+                          setAuthModalOpen(true);
+                        }}
+                        className="w-full flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-botanical-100 hover:bg-botanical-200 text-botanical-900 text-xs font-semibold border border-botanical-300 transition active:scale-95"
+                      >
+                        <span>Create a New Account</span>
+                      </button>
                     </div>
                   )}
 
@@ -469,6 +483,12 @@ export default function Header() {
             </form>
           </div>
         )}
+        {/* Customer Auth Modal (Login / Sign Up) */}
+        <CustomerAuthModal
+          isOpen={authModalOpen}
+          onClose={() => setAuthModalOpen(false)}
+          initialMode={authModalMode}
+        />
       </header>
     </>
   );

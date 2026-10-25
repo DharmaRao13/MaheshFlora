@@ -29,6 +29,7 @@ import { useCustomerAuth } from '@/context/CustomerAuthContext';
 import { DEFAULT_SETTINGS, formatINR } from '@/lib/config';
 import { DeliveryTimeSlot, PaymentMethod, SavedAddress, AddressLabel } from '@/types';
 import { validateIndianPhone, validatePincode } from '@/lib/business';
+import PromotionalBanner from '@/components/PromotionalBanner';
 
 const DAYS_OF_WEEK = [
   { id: 'Mon', label: 'Mon', name: 'Monday' },
@@ -76,6 +77,38 @@ export default function CheckoutClient() {
   const [pincode, setPincode] = useState('560001');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [addressLabel, setAddressLabel] = useState<AddressLabel | string>('Home');
+
+  // Active delivery promotion state
+  const [activePromo, setActivePromo] = useState<{
+    id: string;
+    title: string;
+    type: string;
+    minOrderAmountPaise: number;
+    bannerWording?: string;
+  } | null>(null);
+  const [effectiveDeliveryThreshold, setEffectiveDeliveryThreshold] = useState<number>(DEFAULT_SETTINGS.freeDeliveryThresholdPaise);
+
+  useEffect(() => {
+    try {
+      const p = fetch('/api/promotions/active');
+      if (p && typeof p.then === 'function') {
+        p.then((res) => (res && typeof res.json === 'function' && res.ok ? res.json() : null))
+          .then((data) => {
+            if (data && data.active && data.promotion) {
+              setActivePromo(data.promotion);
+              if (typeof data.promotion.minOrderAmountPaise === 'number' && data.promotion.minOrderAmountPaise > 0) {
+                setEffectiveDeliveryThreshold(data.promotion.minOrderAmountPaise);
+              } else if (typeof data.freeDeliveryThresholdPaise === 'number') {
+                setEffectiveDeliveryThreshold(data.freeDeliveryThresholdPaise);
+              }
+            } else if (data && typeof data.freeDeliveryThresholdPaise === 'number') {
+              setEffectiveDeliveryThreshold(data.freeDeliveryThresholdPaise);
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {}
+  }, []);
 
   // Prefill phone and name from customer auth or localStorage if available
   useEffect(() => {
@@ -569,9 +602,10 @@ export default function CheckoutClient() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6">
+      <PromotionalBanner />
       
-      <div className="mb-6 pb-3 border-b border-botanical-100">
+      <div className="pb-3 border-b border-botanical-100">
         <h1 className="font-serif text-2xl sm:text-3xl font-bold text-botanical-900">
           Delivery & Checkout
         </h1>
@@ -1287,28 +1321,47 @@ export default function CheckoutClient() {
             ))}
           </div>
 
-          <div className="space-y-2 pt-3 border-t border-botanical-200 text-xs sm:text-sm">
-            <div className="flex justify-between text-stone-600">
-              <span>Items Subtotal</span>
-              <span className="font-semibold text-botanical-900">{formatINR(subtotalPaise)}</span>
-            </div>
-            <div className="flex justify-between text-stone-600">
-              <span>Doorstep Delivery</span>
-              <span>
-                {deliveryFeePaise === 0 ? (
-                  <span className="text-emerald-700 font-bold">FREE</span>
-                ) : (
-                  formatINR(deliveryFeePaise)
+          {(() => {
+            const isFreeDelivery = deliveryFeePaise === 0 || Boolean(activePromo && subtotalPaise >= effectiveDeliveryThreshold);
+            const displayDeliveryFeePaise = isFreeDelivery ? 0 : deliveryFeePaise;
+            const displayTotalPaise = subtotalPaise + displayDeliveryFeePaise;
+
+            return (
+              <div className="space-y-2 pt-3 border-t border-botanical-200 text-xs sm:text-sm">
+                <div className="flex justify-between text-stone-600">
+                  <span>Items Subtotal</span>
+                  <span className="font-semibold text-botanical-900">{formatINR(subtotalPaise)}</span>
+                </div>
+                <div className="flex justify-between text-stone-600">
+                  <span>Doorstep Delivery</span>
+                  <span>
+                    {isFreeDelivery ? (
+                      <span className="text-emerald-700 font-bold inline-flex items-center gap-1.5">
+                        <span>FREE</span>
+                        <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                          Promotion applied
+                        </span>
+                      </span>
+                    ) : (
+                      formatINR(displayDeliveryFeePaise)
+                    )}
+                  </span>
+                </div>
+                {!isFreeDelivery && activePromo && (
+                  <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200/60 rounded-lg p-2 flex items-center justify-between">
+                    <span>Add {formatINR(Math.max(0, effectiveDeliveryThreshold - subtotalPaise))} more to unlock free delivery!</span>
+                    <Link href="/flowers" className="text-botanical-700 font-semibold underline ml-2">Add Items</Link>
+                  </div>
                 )}
-              </span>
-            </div>
-            <div className="pt-2 border-t border-botanical-200 flex justify-between items-baseline">
-              <span className="text-base font-bold text-botanical-900">Total to Pay</span>
-              <span className="text-xl font-serif font-bold text-botanical-900">
-                {formatINR(totalPaise)}
-              </span>
-            </div>
-          </div>
+                <div className="pt-2 border-t border-botanical-200 flex justify-between items-baseline">
+                  <span className="text-base font-bold text-botanical-900">Total to Pay</span>
+                  <span className="text-xl font-serif font-bold text-botanical-900">
+                    {formatINR(displayTotalPaise)}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
           <button
             type="submit"

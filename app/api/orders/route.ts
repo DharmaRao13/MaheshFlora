@@ -11,6 +11,8 @@ import {
   getOrdersByIds,
   getSavedAddressesByUid,
   createSavedAddress,
+  getCustomerCompletedOrderCount,
+  incrementPromotionOrderCount,
 } from '@/lib/db/store';
 import {
   validateIndianPhone,
@@ -197,7 +199,11 @@ export async function POST(req: NextRequest) {
     const products = await getProducts();
     const settings = await getSettings();
 
-    const calculation = calculateOrderTotals(items, products, settings);
+    const customerOrderCount = await getCustomerCompletedOrderCount(verifiedPhone, verifiedUid);
+    const calculation = calculateOrderTotals(items, products, settings, {
+      isFirstTimeCustomer: customerOrderCount === 0,
+      customerCompletedOrderCount: customerOrderCount,
+    });
     if (calculation.error) {
       return NextResponse.json(
         { error: calculation.error },
@@ -308,6 +314,11 @@ export async function POST(req: NextRequest) {
       subtotalPaise: calculation.subtotalPaise,
       deliveryFeePaise: calculation.deliveryFeePaise,
       totalPaise: calculation.totalPaise,
+      promotionId: calculation.appliedPromotion?.promotionId,
+      minPurchaseThresholdPaise: calculation.appliedPromotion?.minPurchaseThresholdPaise,
+      discountAmountPaise: calculation.appliedPromotion?.discountAmountPaise,
+      eligibilityReason: calculation.appliedPromotion?.eligibilityReason,
+      appliedDeliveryFeePaise: calculation.deliveryFeePaise,
       deliverySchedule,
       orderStatus: 'pending_confirmation',
       paymentStatus: isCod ? 'payment_due' : 'unpaid',
@@ -328,6 +339,11 @@ export async function POST(req: NextRequest) {
 
     // Save order in store
     const savedOrder = await createOrder(newOrder);
+
+    // If free delivery promotion was applied, increment qualifying orders count
+    if (calculation.appliedPromotion?.promotionId) {
+      await incrementPromotionOrderCount(calculation.appliedPromotion.promotionId);
+    }
 
     // If subscription mode, create the corresponding subscription record
     let savedSubscription: Subscription | null = null;

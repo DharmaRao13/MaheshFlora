@@ -45,6 +45,18 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
     "PBEL City (Peeramcheru)",
     "Other Gated Community / Apartment (Hyderabad)",
   ],
+  deliveryPromotion: {
+    id: 'promo-free-delivery',
+    enabled: false,
+    title: 'Free Delivery for First Time Customers',
+    type: 'first_time_customers',
+    minOrderAmountPaise: 0,
+    maxQualifyingOrders: 100,
+    currentQualifyingOrdersCount: 0,
+    maxUsesPerCustomer: 1,
+    isCombinable: true,
+    bannerWording: '🎉 Free Delivery on your first order! Welcome to Mahesh Flora.',
+  },
 };
 
 export function formatINR(paise: number): string {

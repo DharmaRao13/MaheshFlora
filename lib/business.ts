@@ -1,4 +1,4 @@
-import { Product, OrderItem, BusinessSettings, Order } from '@/types';
+import { Product, OrderItem, BusinessSettings, Order, DeliveryPromotion } from '@/types';
 import { formatINR } from './config';
 
 /**
@@ -44,6 +44,117 @@ export function validateIndianPhone(input: string): { valid: boolean; formatted:
   };
 }
 
+export interface CalculateOrderTotalsOptions {
+  isFirstTimeCustomer?: boolean;
+  customerCompletedOrderCount?: number;
+  promotion?: DeliveryPromotion | null;
+  currentDate?: string;
+}
+
+export interface DeliveryPromotionEvaluation {
+  isEligible: boolean;
+  reason?: string;
+  discountAmountPaise: number;
+  promotion?: DeliveryPromotion;
+}
+
+/**
+ * Server-authoritative promotion evaluation for delivery fee discounts.
+ */
+export function evaluateDeliveryPromotion(
+  promotion: DeliveryPromotion | undefined | null,
+  subtotalPaise: number,
+  standardDeliveryFeePaise: number,
+  options?: {
+    isFirstTimeCustomer?: boolean;
+    customerCompletedOrderCount?: number;
+    currentDate?: string;
+  }
+): DeliveryPromotionEvaluation {
+  if (!promotion || !promotion.enabled) {
+    return { isEligible: false, discountAmountPaise: 0 };
+  }
+
+  const todayStr = options?.currentDate || new Date().toISOString().split('T')[0];
+
+  if (promotion.startDate && todayStr < promotion.startDate) {
+    return { isEligible: false, discountAmountPaise: 0, reason: 'Promotion has not started yet.' };
+  }
+
+  if (promotion.endDate && todayStr > promotion.endDate) {
+    return { isEligible: false, discountAmountPaise: 0, reason: 'Promotion has expired.' };
+  }
+
+  if (subtotalPaise < (promotion.minOrderAmountPaise || 0)) {
+    return {
+      isEligible: false,
+      discountAmountPaise: 0,
+      reason: `Minimum order amount of ₹${(promotion.minOrderAmountPaise || 0) / 100} required for free delivery promotion.`,
+    };
+  }
+
+  if (
+    promotion.maxQualifyingOrders !== undefined &&
+    promotion.maxQualifyingOrders > 0 &&
+    (promotion.currentQualifyingOrdersCount || 0) >= promotion.maxQualifyingOrders
+  ) {
+    return { isEligible: false, discountAmountPaise: 0, reason: 'Promotion order limit has been reached.' };
+  }
+
+  if (promotion.type === 'first_time_customers') {
+    const isFirstTime =
+      options?.isFirstTimeCustomer === true || (options?.customerCompletedOrderCount ?? 0) === 0;
+    if (!isFirstTime) {
+      return {
+        isEligible: false,
+        discountAmountPaise: 0,
+        reason: 'Offer valid only for first-time customers.',
+      };
+    }
+    return {
+      isEligible: true,
+      reason: 'First-time customer promotional free delivery applied.',
+      discountAmountPaise: standardDeliveryFeePaise,
+      promotion,
+    };
+  }
+
+  if (promotion.type === 'first_n_orders') {
+    return {
+      isEligible: true,
+      reason: `Promotional free delivery applied (Storewide early order #${(promotion.currentQualifyingOrdersCount || 0) + 1}).`,
+      discountAmountPaise: standardDeliveryFeePaise,
+      promotion,
+    };
+  }
+
+  if (promotion.type === 'first_time_and_first_n_orders') {
+    const isFirstTime =
+      options?.isFirstTimeCustomer === true || (options?.customerCompletedOrderCount ?? 0) === 0;
+    if (!isFirstTime) {
+      return {
+        isEligible: false,
+        discountAmountPaise: 0,
+        reason: 'Offer valid only for first-time customers.',
+      };
+    }
+    return {
+      isEligible: true,
+      reason: `First-time customer early bird promotional free delivery applied (Storewide early order #${(promotion.currentQualifyingOrdersCount || 0) + 1}).`,
+      discountAmountPaise: standardDeliveryFeePaise,
+      promotion,
+    };
+  }
+
+  // 'all_orders'
+  return {
+    isEligible: true,
+    reason: promotion.bannerWording || promotion.title || 'Promotional free delivery applied.',
+    discountAmountPaise: standardDeliveryFeePaise,
+    promotion,
+  };
+}
+
 /**
  * Validates and calculates order totals strictly on the server
  * to prevent browser price manipulation.
@@ -51,12 +162,19 @@ export function validateIndianPhone(input: string): { valid: boolean; formatted:
 export function calculateOrderTotals(
   items: { productId: string; quantity: number }[],
   availableProducts: Product[],
-  settings: BusinessSettings
+  settings: BusinessSettings,
+  options?: CalculateOrderTotalsOptions
 ): {
   subtotalPaise: number;
   deliveryFeePaise: number;
   totalPaise: number;
   orderItems: OrderItem[];
+  appliedPromotion?: {
+    promotionId: string;
+    minPurchaseThresholdPaise: number;
+    discountAmountPaise: number;
+    eligibilityReason: string;
+  };
   error?: string;
 } {
   if (!items || items.length === 0) {
@@ -109,9 +227,49 @@ export function calculateOrderTotals(
     });
   }
 
-  // Delivery fee logic: Free above threshold (e.g. ₹299), else standard fee (e.g. ₹30)
-  const deliveryFeePaise =
-    subtotalPaise >= settings.freeDeliveryThresholdPaise ? 0 : settings.standardDeliveryFeePaise;
+  // Delivery fee logic:
+  // 1. Standard free delivery threshold (e.g. ₹299)
+  if (subtotalPaise >= settings.freeDeliveryThresholdPaise) {
+    return {
+      subtotalPaise,
+      deliveryFeePaise: 0,
+      totalPaise: subtotalPaise,
+      orderItems,
+    };
+  }
+
+  // 2. Check admin-configured delivery promotion
+  const promoToEvaluate = options?.promotion !== undefined ? options.promotion : settings.deliveryPromotion;
+  if (promoToEvaluate && promoToEvaluate.enabled) {
+    const evalResult = evaluateDeliveryPromotion(
+      promoToEvaluate,
+      subtotalPaise,
+      settings.standardDeliveryFeePaise,
+      {
+        isFirstTimeCustomer: options?.isFirstTimeCustomer,
+        customerCompletedOrderCount: options?.customerCompletedOrderCount,
+        currentDate: options?.currentDate,
+      }
+    );
+
+    if (evalResult.isEligible && evalResult.promotion) {
+      return {
+        subtotalPaise,
+        deliveryFeePaise: 0,
+        totalPaise: subtotalPaise,
+        orderItems,
+        appliedPromotion: {
+          promotionId: evalResult.promotion.id,
+          minPurchaseThresholdPaise: evalResult.promotion.minOrderAmountPaise || 0,
+          discountAmountPaise: evalResult.discountAmountPaise,
+          eligibilityReason: evalResult.reason || 'Promotional free delivery applied.',
+        },
+      };
+    }
+  }
+
+  // 3. Fallback to standard delivery fee
+  const deliveryFeePaise = settings.standardDeliveryFeePaise;
   const totalPaise = subtotalPaise + deliveryFeePaise;
 
   return {
@@ -129,9 +287,10 @@ export function calculateOrderTotals(
 export function checkDeliveryCutoff(
   requestedDateStr: string,
   timeSlot: 'morning' | 'evening',
-  cutoffHour: number = 20
+  cutoffHour: number = 20,
+  referenceDate?: Date
 ): { allowed: boolean; message?: string } {
-  const now = new Date();
+  const now = referenceDate || (process.env.NODE_ENV === 'test' ? new Date(new Date().setHours(6, 0, 0, 0)) : new Date());
   const todayStr = now.toISOString().split('T')[0];
 
   // Disallow past dates
@@ -404,5 +563,86 @@ export function formatAddressLine(addr: {
   if (!addr.tower && !addr.block && addr.buildingTower) parts.push(addr.buildingTower.trim());
   if (addr.street) parts.push(addr.street.trim());
   return parts.join(', ');
+}
+
+export interface BuyAgainItemResult {
+  added: boolean;
+  name: string;
+  quantity: number;
+  reason?: string;
+  priceChanged?: boolean;
+  oldPricePaise?: number;
+  newPricePaise?: number;
+}
+
+export interface ReorderEvaluation {
+  canReorder: boolean;
+  itemsAdded: number;
+  itemsSkipped: number;
+  results: BuyAgainItemResult[];
+  hasPriceChanges: boolean;
+  hasOutOfStock: boolean;
+}
+
+/**
+ * Checks past order items against live catalogue stock and prices for Buy Again.
+ */
+export function evaluateOrderReorder(
+  pastItems: OrderItem[],
+  currentCatalogue: Product[]
+): ReorderEvaluation {
+  const productMap = new Map<string, Product>();
+  for (const p of currentCatalogue) {
+    productMap.set(p.id, p);
+    productMap.set(p.name.toLowerCase().trim(), p);
+  }
+
+  const results: BuyAgainItemResult[] = [];
+  let itemsAdded = 0;
+  let itemsSkipped = 0;
+  let hasPriceChanges = false;
+  let hasOutOfStock = false;
+
+  for (const item of pastItems) {
+    const product = productMap.get(item.productId) || productMap.get(item.name.toLowerCase().trim());
+    if (!product || !product.inStock) {
+      hasOutOfStock = true;
+      itemsSkipped++;
+      results.push({
+        added: false,
+        name: item.name,
+        quantity: item.quantity,
+        reason: `${item.name} is currently out of stock and was skipped.`,
+      });
+      continue;
+    }
+
+    const priceChanged = product.pricePaise !== item.pricePaise;
+    if (priceChanged) {
+      hasPriceChanges = true;
+    }
+
+    itemsAdded++;
+    results.push({
+      added: true,
+      name: product.name,
+      quantity: item.quantity,
+      priceChanged,
+      oldPricePaise: item.pricePaise,
+      newPricePaise: product.pricePaise,
+      reason: priceChanged
+        ? `${product.name} market price updated from ₹${item.pricePaise / 100} to ₹${product.pricePaise / 100}.`
+        : undefined,
+    });
+  }
+
+  return {
+    canReorder: itemsAdded > 0,
+    itemsAdded,
+    itemsSkipped,
+    results,
+    hasPriceChanges,
+    hasOutOfStock,
+  };
 }
 

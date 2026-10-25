@@ -252,7 +252,7 @@ describe('Stall Management & Complete Three-Way Analytics Dashboard', () => {
       createdAt: '2026-10-24T06:00:00.000Z',
     });
 
-    const dateRange = calculateDateRange('today', '2026-10-24', '2026-10-24');
+    const dateRange = calculateDateRange('custom', '2026-10-24', '2026-10-24');
     const stallEntries = await getStallEntries({ fromDate: '2026-10-24', toDate: '2026-10-24' });
 
     // Compute Stall Analysis
@@ -326,7 +326,7 @@ describe('Stall Management & Complete Three-Way Analytics Dashboard', () => {
       createdAt: '2026-10-24T07:00:00.000Z',
     });
 
-    const dateRange = calculateDateRange('today', '2026-10-24', '2026-10-24');
+    const dateRange = calculateDateRange('custom', '2026-10-24', '2026-10-24');
     const stallEntries = await getStallEntries({ fromDate: '2026-10-24', toDate: '2026-10-24' });
 
     // Compute Online Analysis (even when stallEntries are passed, view: 'online' must omit them)
@@ -438,7 +438,7 @@ describe('Stall Management & Complete Three-Way Analytics Dashboard', () => {
       createdBy: 'admin@maheshflora.com',
     });
 
-    const dateRange = calculateDateRange('today', '2026-10-24', '2026-10-24');
+    const dateRange = calculateDateRange('custom', '2026-10-24', '2026-10-24');
 
     // Compute Combined Analysis
     const combined = computeAnalyticsSummary({

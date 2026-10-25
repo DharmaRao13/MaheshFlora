@@ -20,9 +20,29 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const updates = await req.json();
+
+    // Validate deliveryPromotion if present in updates
+    if (updates.deliveryPromotion) {
+      const dp = updates.deliveryPromotion;
+      if (typeof dp.minOrderAmountPaise === 'number' && (isNaN(dp.minOrderAmountPaise) || dp.minOrderAmountPaise < 0)) {
+        return NextResponse.json(
+          { error: 'Minimum purchase amount must be a non-negative number.' },
+          { status: 400 }
+        );
+      }
+      if (dp.type && !['all_orders', 'first_time_customers', 'first_n_orders', 'first_time_and_first_n_orders'].includes(dp.type)) {
+        return NextResponse.json(
+          { error: 'Invalid promotion eligibility type.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const updated = await updateSettings(updates);
     return NextResponse.json({ success: true, settings: updated });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+export const PUT = PATCH;

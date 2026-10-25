@@ -139,6 +139,12 @@ export interface Order {
   deliveryFeePaise: number;
   totalPaise: number;
   testPaymentPaise?: number; // Exactly 100 paise (₹1.00) when test payment mode is active
+  // Free delivery promotion audit fields
+  promotionId?: string;
+  minPurchaseThresholdPaise?: number;
+  discountAmountPaise?: number;
+  eligibilityReason?: string;
+  appliedDeliveryFeePaise?: number;
   deliverySchedule: DeliverySchedule;
   orderStatus: OrderStatus;
   paymentStatus: PaymentStatus;
@@ -236,6 +242,54 @@ export interface BusinessSettings {
     evening: { label: string; time: string };
   };
   serviceableCommunities: string[];
+  deliveryPromotion?: DeliveryPromotion;
+}
+
+export type DeliveryPromotionType =
+  | 'all_orders'
+  | 'first_time_customers'
+  | 'first_n_orders'
+  | 'first_time_and_first_n_orders';
+
+export interface DeliveryPromotion {
+  id: string; // e.g. 'promo-free-delivery'
+  enabled: boolean;
+  title: string;
+  type: DeliveryPromotionType;
+  minOrderAmountPaise: number;
+  maxQualifyingOrders?: number; // Cap for first_n_orders
+  currentQualifyingOrdersCount?: number;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  maxUsesPerCustomer?: number;
+  isCombinable?: boolean;
+  bannerWording?: string;
+}
+
+export interface AdminCustomerSummary {
+  uid: string;
+  phone: string;
+  name: string;
+  completedOrdersCount: number;
+  totalOrdersCount: number;
+  totalSpendingPaise: number;
+  firstOrderDate: string;
+  lastOrderDate: string;
+  hasActiveSubscription: boolean;
+}
+
+export interface AdminCustomerDetail extends AdminCustomerSummary {
+  email?: string;
+  savedAddresses: SavedAddress[];
+  orders: Order[];
+  subscriptions: Subscription[];
+  promotionRedemptions: {
+    orderId: string;
+    promotionId: string;
+    discountAmountPaise: number;
+    eligibilityReason: string;
+    date: string;
+  }[];
 }
 
 export interface DailyPriceItem {

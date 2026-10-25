@@ -27,9 +27,13 @@ import {
   BarChart3,
   Receipt,
   Store,
+  Users,
+  Gift,
 } from 'lucide-react';
 import AnalyticsDashboard from '@/components/admin/AnalyticsDashboard';
 import StallManagement from '@/components/admin/StallManagement';
+import CustomerManagement from '@/components/admin/CustomerManagement';
+import DeliveryOffersManagement from '@/components/admin/DeliveryOffersManagement';
 import {
   Order,
   Product,
@@ -60,7 +64,7 @@ interface DashboardMetrics {
 export default function AdminDashboardClient({
   initialTab = 'overview',
 }: {
-  initialTab?: 'overview' | 'analytics' | 'stall' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings';
+  initialTab?: 'overview' | 'analytics' | 'stall' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'customers' | 'delivery-offers' | 'settings';
 }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authMode, setAuthMode] = useState<'passcode' | 'firebase'>('passcode');
@@ -71,7 +75,7 @@ export default function AdminDashboardClient({
   const [authLoading, setAuthLoading] = useState(false);
 
   // Active sub-navigation tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'stall' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'settings'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'stall' | 'daily-prices' | 'orders' | 'products' | 'subscriptions' | 'festivals' | 'customers' | 'delivery-offers' | 'settings'>(initialTab);
 
   // Live state
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
@@ -704,6 +708,8 @@ export default function AdminDashboardClient({
           { id: 'products', label: `Inventory (${products.length})`, icon: Package },
           { id: 'subscriptions', label: `Subscriptions (${subscriptions.length})`, icon: Calendar },
           { id: 'festivals', label: `Festival Bookings (${festivalBookings.length})`, icon: Sparkles },
+          { id: 'customers', label: 'Customers', icon: Users },
+          { id: 'delivery-offers', label: 'Delivery Offers', icon: Gift },
           { id: 'settings', label: 'Store Settings', icon: Settings },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -1890,6 +1896,23 @@ export default function AdminDashboardClient({
             </button>
           </div>
         </form>
+      )}
+
+      {/* CUSTOMER MANAGEMENT TAB */}
+      {activeTab === 'customers' && (
+        <CustomerManagement adminKey={getAdminKey()} />
+      )}
+
+      {/* DELIVERY OFFERS & PROMOTIONS TAB */}
+      {activeTab === 'delivery-offers' && settings && (
+        <DeliveryOffersManagement
+          settings={settings}
+          onSettingsUpdated={(newSettings) => {
+            setSettings(newSettings);
+            setEditSettings(newSettings);
+          }}
+          adminKey={getAdminKey()}
+        />
       )}
 
     </div>

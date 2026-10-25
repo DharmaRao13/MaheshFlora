@@ -18,6 +18,8 @@ import {
   ExpenseCategory,
   StallDailyEntry,
   StallAuditEntry,
+  AdminCustomerSummary,
+  AdminCustomerDetail,
 } from '@/types';
 import { INITIAL_PRODUCTS, INITIAL_FESTIVALS } from './seed';
 import { DEFAULT_SETTINGS } from '../config';
@@ -975,6 +977,227 @@ export async function saveUserProfile(profile: UserProfile): Promise<UserProfile
   }
   saveDb(db);
   return updated;
+}
+
+// ==================== CUSTOMER MANAGEMENT & PROMOTIONS ====================
+
+export async function getCustomerCompletedOrderCount(phone: string, uid?: string): Promise<number> {
+  const cleanPhone = phone ? phone.replace(/[^0-9]/g, '').slice(-10) : '';
+  const orders = await getOrders();
+  const customerOrders = orders.filter((o) => {
+    const oPhone = o.customer?.phone ? o.customer.phone.replace(/[^0-9]/g, '').slice(-10) : '';
+    const phoneMatch = Boolean(cleanPhone && oPhone === cleanPhone);
+    const uidMatch = Boolean(uid && o.customer?.uid === uid);
+    return (phoneMatch || uidMatch) && o.orderStatus !== 'cancelled';
+  });
+  return customerOrders.length;
+}
+
+export async function incrementPromotionOrderCount(promotionId: string): Promise<boolean> {
+  const db = getDb();
+  if (db.settings?.deliveryPromotion && (db.settings.deliveryPromotion.id === promotionId || !db.settings.deliveryPromotion.id)) {
+    db.settings.deliveryPromotion.currentQualifyingOrdersCount =
+      (db.settings.deliveryPromotion.currentQualifyingOrdersCount || 0) + 1;
+    saveDb(db);
+    return true;
+  }
+  return false;
+}
+
+export async function getAdminCustomersList(searchTerm?: string): Promise<AdminCustomerSummary[]> {
+  const allOrders = await getOrders();
+  const allProfiles = (getDb().profiles || []);
+  const allSubs = await getSubscriptions();
+
+  const customerMap = new Map<string, {
+    uid: string;
+    phone: string;
+    name: string;
+    orders: Order[];
+  }>();
+
+  for (const prof of allProfiles) {
+    const cleanPhone = prof.phone ? prof.phone.replace(/[^0-9]/g, '').slice(-10) : '';
+    const key = cleanPhone || prof.uid;
+    if (key) {
+      customerMap.set(key, {
+        uid: prof.uid,
+        phone: prof.phone || '',
+        name: prof.displayName || '',
+        orders: [],
+      });
+    }
+  }
+
+  for (const order of allOrders) {
+    const rawPhone = order.customer?.phone || '';
+    const cleanPhone = rawPhone.replace(/[^0-9]/g, '').slice(-10);
+    const orderUid = order.customer?.uid;
+    const key = cleanPhone || orderUid || order.id;
+
+    let existing = customerMap.get(key);
+    if (!existing && cleanPhone) {
+      for (const val of customerMap.values()) {
+        if (orderUid && val.uid === orderUid) {
+          existing = val;
+          break;
+        }
+      }
+    }
+
+    if (!existing) {
+      existing = {
+        uid: orderUid || `cust-${cleanPhone || order.id}`,
+        phone: rawPhone,
+        name: order.customer?.customerName || order.customer?.recipientName || 'Customer',
+        orders: [],
+      };
+      customerMap.set(key, existing);
+    } else {
+      if (!existing.name && (order.customer?.customerName || order.customer?.recipientName)) {
+        existing.name = order.customer.customerName || order.customer.recipientName || '';
+      }
+      if (!existing.phone && rawPhone) {
+        existing.phone = rawPhone;
+      }
+      if ((!existing.uid || existing.uid.startsWith('cust-')) && orderUid) {
+        existing.uid = orderUid;
+      }
+    }
+
+    existing.orders.push(order);
+  }
+
+  const summaries: AdminCustomerSummary[] = [];
+  const term = (searchTerm || '').trim().toLowerCase();
+
+  for (const [, item] of customerMap.entries()) {
+    const nameMatch = item.name.toLowerCase().includes(term);
+    const phoneMatch = item.phone.replace(/[^0-9]/g, '').includes(term);
+    if (term && !nameMatch && !phoneMatch) {
+      continue;
+    }
+
+    const completedOrders = item.orders.filter(
+      (o) => o.orderStatus === 'delivered' || o.paymentStatus === 'paid'
+    );
+    const totalSpendingPaise = completedOrders.reduce((sum, o) => sum + o.totalPaise, 0);
+
+    const sortedOrders = [...item.orders].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+
+    const firstOrderDate = sortedOrders[0]?.createdAt || new Date().toISOString();
+    const lastOrderDate = sortedOrders[sortedOrders.length - 1]?.createdAt || firstOrderDate;
+
+    const hasActiveSubscription = allSubs.some(
+      (s) =>
+        s.status === 'active' &&
+        (s.customer?.uid === item.uid ||
+          (item.phone && s.customer?.phone?.replace(/[^0-9]/g, '').slice(-10) === item.phone.replace(/[^0-9]/g, '').slice(-10)))
+    );
+
+    summaries.push({
+      uid: item.uid,
+      phone: item.phone,
+      name: item.name || 'Customer',
+      completedOrdersCount: completedOrders.length,
+      totalOrdersCount: item.orders.length,
+      totalSpendingPaise,
+      firstOrderDate,
+      lastOrderDate,
+      hasActiveSubscription,
+    });
+  }
+
+  return summaries.sort((a, b) => new Date(b.lastOrderDate).getTime() - new Date(a.lastOrderDate).getTime());
+}
+
+export async function getAdminCustomerDetail(identifier: string): Promise<AdminCustomerDetail | null> {
+  if (!identifier) return null;
+
+  const cleanInput = identifier.replace(/[^0-9]/g, '').slice(-10);
+  const list = await getAdminCustomersList();
+  const summary = list.find((c) => {
+    if (c.uid === identifier) return true;
+    const cPhone = c.phone.replace(/[^0-9]/g, '').slice(-10);
+    return cleanInput && cPhone === cleanInput;
+  });
+
+  if (!summary) return null;
+
+  const allOrders = await getOrders();
+  const allSubs = await getSubscriptions();
+  const targetCleanPhone = summary.phone.replace(/[^0-9]/g, '').slice(-10);
+
+  const customerOrders = allOrders.filter((o) => {
+    const oPhone = o.customer?.phone?.replace(/[^0-9]/g, '').slice(-10);
+    const phoneMatch = Boolean(targetCleanPhone && oPhone === targetCleanPhone);
+    const uidMatch = Boolean(summary.uid && o.customer?.uid === summary.uid);
+    return phoneMatch || uidMatch;
+  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const customerSubs = allSubs.filter((s) => {
+    const sPhone = s.customer?.phone?.replace(/[^0-9]/g, '').slice(-10);
+    const phoneMatch = Boolean(targetCleanPhone && sPhone === targetCleanPhone);
+    const uidMatch = Boolean(summary.uid && s.customer?.uid === summary.uid);
+    return phoneMatch || uidMatch;
+  });
+
+  const savedAddresses = summary.uid && !summary.uid.startsWith('cust-')
+    ? await getSavedAddressesByUid(summary.uid)
+    : [];
+
+  if (savedAddresses.length === 0 && customerOrders.length > 0) {
+    const seen = new Set<string>();
+    for (const ord of customerOrders) {
+      const addr = ord.customer;
+      const key = `${addr.flatNumber}-${addr.tower || ''}-${addr.block || ''}-${addr.apartmentCommunity || addr.locality}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        savedAddresses.push({
+          id: `derived-${ord.id}`,
+          uid: summary.uid,
+          recipientName: addr.recipientName || addr.customerName || summary.name,
+          phone: addr.phone || summary.phone,
+          alternatePhone: addr.alternatePhone,
+          flatNumber: addr.flatNumber || '',
+          tower: addr.tower,
+          block: addr.block,
+          street: addr.street,
+          apartmentCommunity: addr.apartmentCommunity,
+          locality: addr.locality || '',
+          landmark: addr.landmark,
+          city: addr.city || 'Bengaluru',
+          state: addr.state || 'Karnataka',
+          pincode: addr.pincode || '560001',
+          deliveryInstructions: addr.deliveryInstructions,
+          label: addr.label || 'Home',
+          isDefault: savedAddresses.length === 0,
+          createdAt: ord.createdAt,
+          updatedAt: ord.updatedAt,
+        });
+      }
+    }
+  }
+
+  const promotionRedemptions = customerOrders
+    .filter((o) => Boolean(o.promotionId))
+    .map((o) => ({
+      orderId: o.id,
+      promotionId: o.promotionId!,
+      discountAmountPaise: o.discountAmountPaise || 0,
+      eligibilityReason: o.eligibilityReason || 'Free Delivery Promotion',
+      date: o.createdAt,
+    }));
+
+  return {
+    ...summary,
+    savedAddresses,
+    orders: customerOrders,
+    subscriptions: customerSubs,
+    promotionRedemptions,
+  };
 }
 
 // ==================== FESTIVALS ====================

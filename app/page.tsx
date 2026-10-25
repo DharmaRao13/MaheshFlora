@@ -15,6 +15,7 @@ import {
 import { getProducts, getFestivals } from '@/lib/db/store';
 import { DEFAULT_SETTINGS, formatINR } from '@/lib/config';
 import ProductCard from '@/components/ProductCard';
+import PromotionalBanner from '@/components/PromotionalBanner';
 
 export const revalidate = 0; // Dynamic data
 
@@ -27,6 +28,7 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-12 sm:space-y-20">
+      <PromotionalBanner />
       
       {/* 1. HERO SECTION */}
       <section className="relative overflow-hidden bg-gradient-to-b from-botanical-50/60 via-cream-50 to-cream-50 pt-6 sm:pt-12 pb-12 sm:pb-20 border-b border-botanical-100">

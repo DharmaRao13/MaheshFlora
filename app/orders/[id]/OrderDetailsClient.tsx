@@ -21,11 +21,14 @@ import {
   ArrowLeft,
   RefreshCw,
   Lock,
+  RotateCcw,
+  ArrowRight,
 } from 'lucide-react';
-import { Order, OrderStatus, PaymentStatus } from '@/types';
+import { Order, OrderStatus, PaymentStatus, Product } from '@/types';
 import { formatINR, formatINRWithDecimals, DEFAULT_SETTINGS, buildUpiPaymentUri } from '@/lib/config';
-import { canCancelOrder } from '@/lib/business';
+import { canCancelOrder, evaluateOrderReorder } from '@/lib/business';
 import { subscribeToOrder } from '@/lib/firebase/client';
+import { useCart } from '@/context/CartContext';
 
 interface Props {
   initialOrder: Order;
@@ -41,6 +44,7 @@ const LIFECYCLE_STEPS: { key: OrderStatus; label: string; icon: any }[] = [
 ];
 
 export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Props) {
+  const { addItem } = useCart();
   const [order, setOrder] = useState<Order>(initialOrder);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationNote, setSimulationNote] = useState<string | null>(null);
@@ -48,6 +52,14 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Reorder / Buy Again State
+  const [isReordering, setIsReordering] = useState(false);
+  const [reorderNotice, setReorderNotice] = useState<{
+    title: string;
+    messages: string[];
+    proceedPath: string;
+  } | null>(null);
 
   // Secure access verification state for guest orders
   const [isAccessVerified, setIsAccessVerified] = useState<boolean>(true);
@@ -412,6 +424,58 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
   };
 
   const currentStep = getStepIndex(order.orderStatus);
+
+  const handleBuyAgain = async () => {
+    setIsReordering(true);
+    try {
+      const res = await fetch('/api/products');
+      const data = await res.json();
+      const products: Product[] = data.products || [];
+
+      const evalResult = evaluateOrderReorder(order.items, products);
+
+      if (!evalResult.canReorder) {
+        setReorderNotice({
+          title: 'Items Currently Unavailable',
+          messages: evalResult.results.map((r) => r.reason || `${r.name} is currently out of stock.`),
+          proceedPath: '/flowers',
+        });
+        return;
+      }
+
+      // Add each available product to the cart at current catalogue pricing
+      for (const itemRes of evalResult.results) {
+        if (itemRes.added) {
+          const product = products.find(
+            (p) => p.name.toLowerCase().trim() === itemRes.name.toLowerCase().trim() || p.id === itemRes.name
+          );
+          if (product) {
+            addItem(product, itemRes.quantity);
+          }
+        }
+      }
+
+      // If price drift or some items were out of stock, alert customer with review screen
+      if (evalResult.hasPriceChanges || evalResult.hasOutOfStock) {
+        const notices = evalResult.results
+          .filter((r) => Boolean(r.reason))
+          .map((r) => r.reason!);
+        setReorderNotice({
+          title: 'Cart Updated with Latest Market Prices',
+          messages: notices,
+          proceedPath: '/cart',
+        });
+      } else {
+        if (typeof window !== 'undefined') {
+          window.location.href = '/cart';
+        }
+      }
+    } catch (err: any) {
+      console.error('Buy Again error:', err);
+    } finally {
+      setIsReordering(false);
+    }
+  };
 
   const handleSimulatePayment = async (result: 'success' | 'failed') => {
     setIsSimulating(true);
@@ -1075,18 +1139,96 @@ export default function OrderDetailsClient({ initialOrder, paymentTestMode }: Pr
             <span>Delivery Fee</span>
             <span>
               {order.deliveryFeePaise === 0 ? (
-                <span className="text-emerald-700 font-bold">FREE</span>
+                <span className="text-emerald-700 font-bold inline-flex items-center gap-1.5">
+                  <span>FREE</span>
+                  {order.promotionId && (
+                    <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                      Promotion applied
+                    </span>
+                  )}
+                </span>
               ) : (
                 formatINR(order.deliveryFeePaise)
               )}
             </span>
           </div>
+          {order.eligibilityReason && order.deliveryFeePaise === 0 && (
+            <div className="text-[11px] text-emerald-700 font-medium bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+              🎉 {order.eligibilityReason}
+            </div>
+          )}
           <div className="pt-2 border-t border-botanical-200 flex justify-between items-baseline text-sm font-bold text-botanical-900">
             <span>Total Amount</span>
             <span className="text-lg font-serif">{formatINR(order.totalPaise)}</span>
           </div>
         </div>
+
+        {/* Buy Again Button */}
+        <div className="pt-4 border-t border-botanical-200/80">
+          <button
+            type="button"
+            onClick={handleBuyAgain}
+            disabled={isReordering}
+            className="w-full py-2.5 px-4 rounded-xl bg-botanical-700 hover:bg-botanical-800 disabled:opacity-50 text-cream-50 font-semibold text-xs shadow-soft transition flex items-center justify-center gap-2 active:scale-95"
+          >
+            <RotateCcw className={`w-4 h-4 ${isReordering ? 'animate-spin' : ''}`} />
+            <span>{isReordering ? 'Adding to Cart...' : 'Buy Again (Reorder Flowers)'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Reorder Price Change / Out of Stock Notice Modal */}
+      {reorderNotice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-botanical-950/60 backdrop-blur-xs animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-cream-50 rounded-2xl shadow-elevated border border-botanical-200 w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-3 pb-3 border-b border-botanical-200">
+              <div className="w-10 h-10 rounded-full bg-botanical-100 text-botanical-800 flex items-center justify-center font-bold">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-serif font-bold text-botanical-900">
+                  {reorderNotice.title}
+                </h3>
+                <p className="text-xs text-stone-600">Fresh daily flower market update</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {reorderNotice.messages.map((msg, i) => (
+                <div
+                  key={i}
+                  className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <span>{msg}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setReorderNotice(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600 hover:bg-stone-200/60 transition"
+              >
+                Close
+              </button>
+              <Link
+                href={reorderNotice.proceedPath}
+                onClick={() => setReorderNotice(null)}
+                className="px-4 py-2 rounded-xl bg-botanical-700 hover:bg-botanical-800 text-cream-50 text-xs font-semibold shadow-soft transition flex items-center gap-1.5"
+              >
+                <span>Review in Cart</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Return home link */}
       <div className="text-center pt-2">

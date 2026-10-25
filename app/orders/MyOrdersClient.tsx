@@ -18,12 +18,17 @@ import {
   CreditCard,
   RefreshCw,
   ShoppingBag,
+  RotateCcw,
+  Sparkles,
 } from 'lucide-react';
-import { Order, OrderStatus } from '@/types';
+import { Order, OrderStatus, Product } from '@/types';
 import { formatINR } from '@/lib/config';
 import { useCustomerAuth } from '@/context/CustomerAuthContext';
+import { useCart } from '@/context/CartContext';
+import { evaluateOrderReorder } from '@/lib/business';
 
 export default function MyOrdersClient() {
+  const { addItem } = useCart();
   const { user, customerPhone, idToken, getIdToken, sendOtp, verifyOtp, signOut: customerSignOut } = useCustomerAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,6 +36,14 @@ export default function MyOrdersClient() {
   const [activePhone, setActivePhone] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<'active' | 'history'>('active');
+
+  // Reorder / Buy Again State
+  const [reorderingOrderId, setReorderingOrderId] = useState<string | null>(null);
+  const [reorderNotice, setReorderNotice] = useState<{
+    title: string;
+    messages: string[];
+    proceedPath: string;
+  } | null>(null);
 
   // OTP Login UI state
   const [otpStep, setOtpStep] = useState<'phone' | 'otp'>('phone');
@@ -198,6 +211,59 @@ export default function MyOrdersClient() {
     try {
       localStorage.removeItem('mahesh_customer_phone');
     } catch {}
+  };
+
+  const handleBuyAgain = async (order: Order) => {
+    setReorderingOrderId(order.id);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/products');
+      const data = await res.json();
+      const products: Product[] = data.products || [];
+
+      const evalResult = evaluateOrderReorder(order.items, products);
+
+      if (!evalResult.canReorder) {
+        setReorderNotice({
+          title: 'Items Currently Unavailable',
+          messages: evalResult.results.map((r) => r.reason || `${r.name} is currently out of stock.`),
+          proceedPath: '/flowers',
+        });
+        return;
+      }
+
+      // Add each available product to the cart at current catalogue pricing
+      for (const itemRes of evalResult.results) {
+        if (itemRes.added) {
+          const product = products.find(
+            (p) => p.name.toLowerCase().trim() === itemRes.name.toLowerCase().trim() || p.id === itemRes.name
+          );
+          if (product) {
+            addItem(product, itemRes.quantity);
+          }
+        }
+      }
+
+      // If price drift or some items were out of stock, alert customer with review screen
+      if (evalResult.hasPriceChanges || evalResult.hasOutOfStock) {
+        const notices = evalResult.results
+          .filter((r) => Boolean(r.reason))
+          .map((r) => r.reason!);
+        setReorderNotice({
+          title: 'Items Added with Latest Market Prices',
+          messages: notices,
+          proceedPath: '/cart',
+        });
+      } else {
+        if (typeof window !== 'undefined') {
+          window.location.href = '/cart';
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Unable to reload items from order. Please try again.');
+    } finally {
+      setReorderingOrderId(null);
+    }
   };
 
   // Sort orders newest first
@@ -618,18 +684,82 @@ export default function MyOrdersClient() {
                         </div>
                       </div>
 
-                      <Link
-                        href={orderLink}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-botanical-700 text-cream-50 hover:bg-botanical-800 text-xs font-semibold transition shadow-soft shrink-0"
-                      >
-                        <span>{order.orderStatus === 'delivered' ? 'View Order' : 'Track Order'}</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleBuyAgain(order)}
+                          disabled={reorderingOrderId === order.id}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-botanical-100 hover:bg-botanical-200 text-botanical-900 border border-botanical-300 text-xs font-semibold transition active:scale-95 shrink-0"
+                        >
+                          <RotateCcw className={`w-3.5 h-3.5 ${reorderingOrderId === order.id ? 'animate-spin' : ''}`} />
+                          <span>{reorderingOrderId === order.id ? 'Adding...' : 'Buy Again'}</span>
+                        </button>
+
+                        <Link
+                          href={orderLink}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-botanical-700 text-cream-50 hover:bg-botanical-800 text-xs font-semibold transition shadow-soft shrink-0"
+                        >
+                          <span>{order.orderStatus === 'delivered' ? 'View Order' : 'Track Order'}</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>
               );
             })}
+          </div>
+        )}
+        {/* Reorder Price Change / Out of Stock Notice Modal */}
+        {reorderNotice && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-botanical-950/60 backdrop-blur-xs animate-fade-in"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="bg-cream-50 rounded-2xl shadow-elevated border border-botanical-200 w-full max-w-md p-6 space-y-4">
+              <div className="flex items-center gap-3 pb-3 border-b border-botanical-200">
+                <div className="w-10 h-10 rounded-full bg-botanical-100 text-botanical-800 flex items-center justify-center font-bold">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-botanical-900">
+                    {reorderNotice.title}
+                  </h3>
+                  <p className="text-xs text-stone-600">Fresh daily flower market update</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {reorderNotice.messages.map((msg, i) => (
+                  <div
+                    key={i}
+                    className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                    <span>{msg}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReorderNotice(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600 hover:bg-stone-200/60 transition"
+                >
+                  Close
+                </button>
+                <Link
+                  href={reorderNotice.proceedPath}
+                  onClick={() => setReorderNotice(null)}
+                  className="px-4 py-2 rounded-xl bg-botanical-700 hover:bg-botanical-800 text-cream-50 text-xs font-semibold shadow-soft transition flex items-center gap-1.5"
+                >
+                  <span>Review in Cart</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
           </div>
         )}
       </div>
