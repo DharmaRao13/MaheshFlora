@@ -38,6 +38,16 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // Validate standardDeliveryFeePaise if present in updates
+    if (updates.standardDeliveryFeePaise !== undefined) {
+      if (typeof updates.standardDeliveryFeePaise !== 'number' || isNaN(updates.standardDeliveryFeePaise) || updates.standardDeliveryFeePaise < 0) {
+        return NextResponse.json(
+          { error: 'Standard delivery fee must be a non-negative number.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const updated = await updateSettings(updates);
     return NextResponse.json({ success: true, settings: updated });
   } catch (error: any) {

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Calendar, ArrowRight } from 'lucide-react';
 import { getProducts } from '@/lib/db/store';
 import FlowerCatalogueClient from './FlowerCatalogueClient';
+import PromotionalBanner from '@/components/PromotionalBanner';
 
 export const revalidate = 0; // Dynamic server fetch
 
@@ -11,7 +12,8 @@ export default async function FlowersPage() {
   const availableProducts = allProducts.filter((p) => p.inStock);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-6">
+      <PromotionalBanner />
       <div className="mb-6 sm:mb-8 text-center sm:text-left">
         <h1 className="font-serif text-2xl sm:text-4xl font-bold text-botanical-900 tracking-tight">
           Fresh Flower Catalogue

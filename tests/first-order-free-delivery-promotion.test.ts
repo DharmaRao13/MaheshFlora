@@ -10,6 +10,7 @@ import {
   createOrder,
   getOrderById,
   incrementPromotionOrderCount,
+  getCustomerCompletedOrderCount,
 } from '@/lib/db/store';
 import { PUT as updateSettingsRoute } from '@/app/api/admin/settings/route';
 import { GET as getActivePromoRoute } from '@/app/api/promotions/active/route';
@@ -537,6 +538,171 @@ describe('Admin-Controlled First-Order Free Delivery Promotion Suite', () => {
 
       const unlockedMessage = "🎉 Congratulations! You've unlocked free delivery.";
       expect(unlockedMessage).toBe("🎉 Congratulations! You've unlocked free delivery.");
+    });
+  });
+
+  // =========================================================================
+  // 8. CONFIGURABLE NORMAL DELIVERY FEE
+  // =========================================================================
+  describe('Configurable Normal Delivery Fee', () => {
+    it('1. Admin can configure custom normal delivery fee (e.g. ₹40) and reject negative values', async () => {
+      // Rejects negative delivery fee
+      const invalidReq = new NextRequest('http://localhost:3000/api/admin/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-key': ADMIN_SECRET_KEY,
+        },
+        body: JSON.stringify({
+          standardDeliveryFeePaise: -100,
+        }),
+      });
+      const invalidRes = await updateSettingsRoute(invalidReq);
+      expect(invalidRes.status).toBe(400);
+
+      // Saves valid normal delivery fee of ₹40 (4000 paise)
+      const validReq = new NextRequest('http://localhost:3000/api/admin/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-key': ADMIN_SECRET_KEY,
+        },
+        body: JSON.stringify({
+          standardDeliveryFeePaise: 4000,
+        }),
+      });
+      const validRes = await updateSettingsRoute(validReq);
+      expect(validRes.status).toBe(200);
+
+      const activeRes = await getActivePromoRoute();
+      const activeData = await activeRes.json();
+      expect(activeData.standardDeliveryFeePaise).toBe(4000);
+    });
+  });
+
+  // =========================================================================
+  // 9. CANCELLED, FAILED, REFUNDED & UNPAID ORDERS EFFECT ON ELIGIBILITY & LIMITS
+  // =========================================================================
+  describe('Cancelled, Failed & Refunded Orders Impact', () => {
+    it('1. Cancelled and failed orders do NOT count against customer first-order eligibility', async () => {
+      const customerPhone = '919876543210';
+      const customerUid = 'cust-cancelled-test';
+
+      // Seed a cancelled order
+      await createOrder({
+        id: 'MF-CANCELLED-001',
+        customer: {
+          phone: customerPhone,
+          uid: customerUid,
+          customerName: 'Test Customer',
+          apartmentCommunity: 'Test Society',
+          flatNumber: '101',
+        },
+        items: [{ productId: 'prod-marigold-yellow', name: 'Marigold', pricePaise: 4000, unit: 'pack', quantity: 1, itemTotalPaise: 4000 }],
+        orderType: 'one-time',
+        subtotalPaise: 4000,
+        deliveryFeePaise: 3000,
+        totalPaise: 7000,
+        deliverySchedule: { type: 'one-time', date: '2026-12-01', timeSlot: 'morning' },
+        orderStatus: 'cancelled',
+        paymentStatus: 'unpaid',
+        paymentMethod: 'cod',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Seed a failed order
+      await createOrder({
+        id: 'MF-FAILED-001',
+        customer: {
+          phone: customerPhone,
+          uid: customerUid,
+          customerName: 'Test Customer',
+          apartmentCommunity: 'Test Society',
+          flatNumber: '101',
+        },
+        items: [{ productId: 'prod-marigold-yellow', name: 'Marigold', pricePaise: 4000, unit: 'pack', quantity: 1, itemTotalPaise: 4000 }],
+        orderType: 'one-time',
+        subtotalPaise: 4000,
+        deliveryFeePaise: 3000,
+        totalPaise: 7000,
+        deliverySchedule: { type: 'one-time', date: '2026-12-01', timeSlot: 'morning' },
+        orderStatus: 'pending_confirmation',
+        paymentStatus: 'failed',
+        paymentMethod: 'razorpay',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const count = await getCustomerCompletedOrderCount(customerPhone, customerUid);
+      expect(count).toBe(0);
+
+      // Customer remains fully eligible for first-time customer free delivery
+      const promo: DeliveryPromotion = {
+        id: 'promo-welcome-restored',
+        enabled: true,
+        title: 'First-Order Free Delivery',
+        type: 'first_time_customers',
+        minOrderAmountPaise: 4000,
+      };
+
+      const evalResult = evaluateDeliveryPromotion(promo, 5000, 3000, {
+        isFirstTimeCustomer: count === 0,
+        customerCompletedOrderCount: count,
+      });
+
+      expect(evalResult.isEligible).toBe(true);
+      expect(evalResult.discountAmountPaise).toBe(3000);
+    });
+
+    it('2. Cancelling an order restores the storewide promotion redemption counter', async () => {
+      const promoId = 'promo-restore-counter-test';
+      await updateSettings({
+        ...DEFAULT_SETTINGS,
+        deliveryPromotion: {
+          id: promoId,
+          enabled: true,
+          title: 'Storewide Early Bird',
+          type: 'first_n_orders',
+          minOrderAmountPaise: 4000,
+          maxQualifyingOrders: 10,
+          currentQualifyingOrdersCount: 5,
+        },
+      });
+
+      // Place an order with promotionId
+      const orderId = 'MF-PROMO-RESTORE-001';
+      await createOrder({
+        id: orderId,
+        customer: {
+          phone: '9876543219',
+          customerName: 'Kavitha R',
+          apartmentCommunity: 'Prestige Falcon',
+          flatNumber: 'B-201',
+        },
+        items: [{ productId: 'prod-marigold-yellow', name: 'Marigold', pricePaise: 4000, unit: 'pack', quantity: 1, itemTotalPaise: 4000 }],
+        orderType: 'one-time',
+        subtotalPaise: 4000,
+        deliveryFeePaise: 0,
+        totalPaise: 4000,
+        promotionId: promoId,
+        minPurchaseThresholdPaise: 4000,
+        discountAmountPaise: 3000,
+        deliverySchedule: { type: 'one-time', date: '2026-12-01', timeSlot: 'morning' },
+        orderStatus: 'pending_confirmation',
+        paymentStatus: 'paid',
+        paymentMethod: 'razorpay',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Customer cancels the order
+      const { cancelOrder } = await import('@/lib/db/store');
+      await cancelOrder(orderId, 'Cancelled by customer before harvest');
+
+      const updatedSettings = await getSettings();
+      // Counter was restored (decremented from 5 to 4)
+      expect(updatedSettings.deliveryPromotion?.currentQualifyingOrdersCount).toBe(4);
     });
   });
 });

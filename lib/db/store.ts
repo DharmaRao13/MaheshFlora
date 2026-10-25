@@ -522,6 +522,9 @@ export async function cancelOrder(id: string, reason?: string): Promise<Order> {
   if (order) {
     order.orderStatus = 'cancelled';
     order.cancelledAt = now;
+    if (order.promotionId) {
+      decrementPromotionOrderCount(order.promotionId);
+    }
     order.statusUpdatedAt = now;
     if (reason) {
       order.cancellationReason = reason;
@@ -988,7 +991,11 @@ export async function getCustomerCompletedOrderCount(phone: string, uid?: string
     const oPhone = o.customer?.phone ? o.customer.phone.replace(/[^0-9]/g, '').slice(-10) : '';
     const phoneMatch = Boolean(cleanPhone && oPhone === cleanPhone);
     const uidMatch = Boolean(uid && o.customer?.uid === uid);
-    return (phoneMatch || uidMatch) && o.orderStatus !== 'cancelled';
+    const isExcluded =
+      o.orderStatus === 'cancelled' ||
+      o.paymentStatus === 'failed' ||
+      o.paymentStatus === 'refunded';
+    return (phoneMatch || uidMatch) && !isExcluded;
   });
   return customerOrders.length;
 }
@@ -1000,6 +1007,19 @@ export async function incrementPromotionOrderCount(promotionId: string): Promise
       (db.settings.deliveryPromotion.currentQualifyingOrdersCount || 0) + 1;
     saveDb(db);
     return true;
+  }
+  return false;
+}
+
+export async function decrementPromotionOrderCount(promotionId: string): Promise<boolean> {
+  const db = getDb();
+  if (db.settings?.deliveryPromotion && (db.settings.deliveryPromotion.id === promotionId || !db.settings.deliveryPromotion.id)) {
+    if ((db.settings.deliveryPromotion.currentQualifyingOrdersCount || 0) > 0) {
+      db.settings.deliveryPromotion.currentQualifyingOrdersCount =
+        Math.max(0, (db.settings.deliveryPromotion.currentQualifyingOrdersCount || 0) - 1);
+      saveDb(db);
+      return true;
+    }
   }
   return false;
 }

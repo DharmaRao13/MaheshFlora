@@ -44,6 +44,9 @@ export default function DeliveryOffersManagement({
   const [minOrderRupees, setMinOrderRupees] = useState<number>(
     Math.round((initialPromo.minOrderAmountPaise || 0) / 100)
   );
+  const [normalDeliveryFeeRupees, setNormalDeliveryFeeRupees] = useState<number>(
+    Math.round((settings.standardDeliveryFeePaise || 3000) / 100)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -52,6 +55,9 @@ export default function DeliveryOffersManagement({
     if (settings.deliveryPromotion) {
       setPromo(settings.deliveryPromotion);
       setMinOrderRupees(Math.round((settings.deliveryPromotion.minOrderAmountPaise || 0) / 100));
+    }
+    if (typeof settings.standardDeliveryFeePaise === 'number') {
+      setNormalDeliveryFeeRupees(Math.round(settings.standardDeliveryFeePaise / 100));
     }
   }, [settings]);
 
@@ -76,6 +82,7 @@ export default function DeliveryOffersManagement({
         },
         body: JSON.stringify({
           deliveryPromotion: updatedPromo,
+          standardDeliveryFeePaise: Math.max(0, Math.round(normalDeliveryFeeRupees * 100)),
         }),
       });
 
@@ -340,6 +347,34 @@ export default function DeliveryOffersManagement({
               className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs font-mono bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
             />
             <p className="text-[10px] text-stone-500 mt-1">Default 1 for first-time or welcome offers.</p>
+          </div>
+        </div>
+
+        {/* Normal Delivery Fee Configuration */}
+        <div className="bg-cream-100/70 p-4 rounded-xl border border-botanical-200">
+          <label className="block text-xs font-semibold text-botanical-900 mb-1">
+            Normal Delivery Fee (₹)
+          </label>
+          <p className="text-[11px] text-stone-600 mb-2">
+            The delivery charge customers pay when they do not qualify for free delivery.
+          </p>
+          <div className="flex items-center gap-3">
+            <div className="relative w-40">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-500 font-bold text-xs">
+                ₹
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={normalDeliveryFeeRupees}
+                onChange={(e) => setNormalDeliveryFeeRupees(Math.max(0, Math.floor(Number(e.target.value))))}
+                className="w-full pl-7 pr-3 py-2 rounded-xl border border-stone-300 text-xs font-mono font-bold bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-botanical-600"
+              />
+            </div>
+            <span className="text-xs text-stone-600">
+              Currently {formatINR(normalDeliveryFeeRupees * 100)} per delivery
+            </span>
           </div>
         </div>
 

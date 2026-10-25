@@ -6,22 +6,41 @@ export async function GET() {
     const settings = await getSettings();
     const promo = settings.deliveryPromotion;
     if (!promo || !promo.enabled) {
-      return NextResponse.json({ active: false });
+      return NextResponse.json({
+        active: false,
+        standardDeliveryFeePaise: settings.standardDeliveryFeePaise,
+        freeDeliveryThresholdPaise: settings.freeDeliveryThresholdPaise,
+      });
     }
 
     const todayStr = new Date().toISOString().split('T')[0];
     if (promo.startDate && todayStr < promo.startDate) {
-      return NextResponse.json({ active: false, reason: 'Not started' });
+      return NextResponse.json({
+        active: false,
+        reason: 'Not started',
+        standardDeliveryFeePaise: settings.standardDeliveryFeePaise,
+        freeDeliveryThresholdPaise: settings.freeDeliveryThresholdPaise,
+      });
     }
     if (promo.endDate && todayStr > promo.endDate) {
-      return NextResponse.json({ active: false, reason: 'Expired' });
+      return NextResponse.json({
+        active: false,
+        reason: 'Expired',
+        standardDeliveryFeePaise: settings.standardDeliveryFeePaise,
+        freeDeliveryThresholdPaise: settings.freeDeliveryThresholdPaise,
+      });
     }
     if (
       promo.maxQualifyingOrders !== undefined &&
       promo.maxQualifyingOrders > 0 &&
       (promo.currentQualifyingOrdersCount || 0) >= promo.maxQualifyingOrders
     ) {
-      return NextResponse.json({ active: false, reason: 'Limit reached' });
+      return NextResponse.json({
+        active: false,
+        reason: 'Limit reached',
+        standardDeliveryFeePaise: settings.standardDeliveryFeePaise,
+        freeDeliveryThresholdPaise: settings.freeDeliveryThresholdPaise,
+      });
     }
 
     return NextResponse.json({
